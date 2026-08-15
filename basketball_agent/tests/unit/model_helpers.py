@@ -50,6 +50,10 @@ def make_team(team_id: str = "T", games: int = 10, **overrides) -> TeamFeatureSe
         season_avg_margin=0.0,
     )
     base.update(overrides)
+    # keep the net rating consistent with overridden ratings unless the
+    # caller explicitly set it (strength models read nrtg)
+    if "nrtg" not in overrides and ("ortg" in overrides or "drtg" in overrides):
+        base["nrtg"] = base["ortg"] - base["drtg"]
     return TeamFeatureSet(**base)
 
 

@@ -59,7 +59,36 @@ basketball_agent/
 - [x] **Phase 3** — models B/C/D/E (team strength + win prob, offense/defense PPP, pace, possession-outcome distribution) assembled into simulation input params
 - [x] **Phase 4** — possession-level simulation engine + Monte Carlo (10k sims ≈ 1.7s), §19 distribution stats, §28 sanity tests
 - [x] **Phase 5** — walk-forward backtest (no random splits), §24 metrics, reliability diagram + ECE, three baselines, automated leakage/reality FAIL checks, decay-lambda sweep, synthetic league test bed
-- [ ] Phase 6 — risk/ensemble agents, `basketball predict` CLI, V1 acceptance
+- [x] **Phase 6** — risk agent (confidence + flags), trainable ensemble, prediction agent (reality/leakage gates), prediction settlement loop, `basketball predict` CLI, §32 acceptance checklist tests
+
+## CLI
+
+```powershell
+$env:BASKETBALL_DB_PATH = "C:\lanqiu\storage\basketball.db"
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main predict <game_id> `
+    --as-of 2024-11-19T12:00:00+00:00 --n-simulations 10000 --seed 42 --save
+```
+
+(`basketball predict ...` also works after `pip install -e .`.)  The report follows
+spec §34; `--save` persists the prediction so it can be settled against the
+final score (spec §33: Prediction → Game → Result → Evaluation → Calibration
+→ Model Improvement).
+
+## V1 acceptance (spec §32)
+
+Programmatically verified by `tests/integration/test_v1_acceptance.py`:
+
+```
+[x] 数据 Schema 完成        [x] 数据验证完成         [x] Feature Pipeline 完成
+[x] Elo 完成               [x] Offense/Defense Model 完成
+[x] Pace Model 完成        [x] Score Model 完成
+[x] Possession Simulation 完成   [x] Monte Carlo 完成
+[x] Risk Agent 完成        [x] Ensemble 完成
+[x] Reality Validation 完成 [x] Leakage Detection 完成
+[x] Walk-forward Backtest 完成  [x] Calibration 完成
+[x] Baseline 完成          [x] Reproducibility 完成
+[x] 赛前预测生成完成 (§33)   [x] 完整测试完成
+```
 
 ## Development
 

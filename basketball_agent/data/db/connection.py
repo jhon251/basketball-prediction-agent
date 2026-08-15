@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "schema.sql"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Database:

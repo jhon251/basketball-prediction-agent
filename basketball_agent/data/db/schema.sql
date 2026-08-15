@@ -92,3 +92,30 @@ CREATE INDEX IF NOT EXISTS idx_games_date        ON games (game_date);
 CREATE INDEX IF NOT EXISTS idx_team_stats_team   ON team_game_stats (team_id, game_id);
 CREATE INDEX IF NOT EXISTS idx_player_stats_plyr ON player_game_stats (player_id, game_id);
 CREATE INDEX IF NOT EXISTS idx_availability_game ON player_availability (game_id, source_time);
+
+-- Predictions are stored with their full context and settled against the
+-- final result once the game is FINAL (spec §33: Prediction -> Game ->
+-- Result -> Evaluation -> Calibration -> Model Improvement).
+CREATE TABLE IF NOT EXISTS predictions (
+    prediction_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id          TEXT NOT NULL REFERENCES games (game_id),
+    as_of            TEXT NOT NULL,
+    prob_home        REAL NOT NULL CHECK (prob_home >= 0 AND prob_home <= 1),
+    prob_away        REAL NOT NULL CHECK (prob_away >= 0 AND prob_away <= 1),
+    expected_margin  REAL,
+    expected_total   REAL,
+    n_simulations    INTEGER NOT NULL,
+    seed             INTEGER,
+    confidence       REAL,
+    risk_flags       TEXT,
+    model_version    TEXT NOT NULL,
+    snapshot_id      TEXT,
+    created_at       TEXT NOT NULL,
+    settled          INTEGER NOT NULL DEFAULT 0,
+    settled_at       TEXT,
+    actual_home_score INTEGER,
+    actual_away_score INTEGER,
+    brier            REAL,
+    log_loss         REAL,
+    correct          INTEGER
+);

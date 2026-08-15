@@ -21,6 +21,9 @@ dev = [
     "pytest>=8.0",
 ]
 
+[project.scripts]
+basketball = "basketball_agent.cli.main:main"
+
 [tool.setuptools.packages.find]
 include = ["basketball_agent*"]
 

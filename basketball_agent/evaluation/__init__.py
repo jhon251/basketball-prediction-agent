@@ -25,6 +25,7 @@ from basketball_agent.evaluation.leakage import (
     reality_check,
 )
 from basketball_agent.evaluation.metrics import accuracy, brier_score, log_loss, mae, rmse
+from basketball_agent.evaluation.settlement import SettledPrediction, SettlementStore
 
 __all__ = [
     "BacktestConfig",
@@ -40,6 +41,8 @@ __all__ = [
     "ReliabilityBin",
     "SimulationPredictor",
     "StrengthPredictor",
+    "SettledPrediction",
+    "SettlementStore",
     "accuracy",
     "brier_score",
     "build_reliability_table",
