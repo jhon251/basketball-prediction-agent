@@ -29,6 +29,7 @@ class Settings:
     default_n_simulations: int
     default_seed: int | None
     log_level: str
+    decay_lambda: float
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] = os.environ) -> "Settings":
@@ -40,6 +41,7 @@ class Settings:
             default_n_simulations=int(environ.get("BASKETBALL_N_SIMULATIONS", "10000")),
             default_seed=_parse_optional_int(environ.get("BASKETBALL_SEED", "42")),
             log_level=environ.get("BASKETBALL_LOG_LEVEL", "INFO"),
+            decay_lambda=float(environ.get("BASKETBALL_DECAY_LAMBDA", "0.0")),
         )
 
 

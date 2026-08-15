@@ -55,8 +55,8 @@ basketball_agent/
 ## Phase status
 
 - [x] **Phase 1** — skeleton, schemas, data validation, SQLite + snapshots, test framework
-- [ ] Phase 2 — feature pipeline (team strength, form, pace, shooting, rebounding, turnovers, time decay)
-- [ ] Phase 3 — Elo / offense-defense / pace / score models
+- [x] **Phase 2** — feature pipeline (Elo strength, net/off/def ratings, recent form, pace, shooting, rebounding, turnovers, time decay, rest days, availability)
+- [ ] Phase 3 — offense-defense / pace / score models
 - [ ] Phase 4 — possession-level simulation + Monte Carlo
 - [ ] Phase 5 — walk-forward backtest, calibration, baselines, leakage detection
 - [ ] Phase 6 — risk/ensemble agents, `basketball predict` CLI, V1 acceptance

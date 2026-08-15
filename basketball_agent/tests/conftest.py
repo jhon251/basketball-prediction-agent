@@ -13,6 +13,8 @@ import pytest
 
 from basketball_agent.agents.validation_agent import DataValidationAgent
 from basketball_agent.data.db.connection import Database
+from basketball_agent.data.db.loader import DataIngestor
+from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import GameStatus, League, PlayerAvailabilityStatus
 from basketball_agent.data.schemas.dataset import Dataset
 from basketball_agent.data.schemas.game import (
@@ -211,3 +213,42 @@ def db(tmp_path) -> Database:
     database = Database(tmp_path / "test.db")
     database.initialize()
     return database
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (feature pipeline) helpers
+# ---------------------------------------------------------------------------
+
+TARGET_GAME_ID = "20241120_LAL_BOS"
+TARGET_GAME_DATE = datetime(2024, 11, 20, 2, 0, tzinfo=UTC)
+PREDICT_AS_OF = datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+
+
+def raw_from_dataset(ds: Dataset) -> dict:
+    """Serialize a Dataset back into the raw dict format the ingestor reads."""
+    return {
+        "teams": [t.model_dump(mode="json") for t in ds.teams],
+        "players": [p.model_dump(mode="json") for p in ds.players],
+        "games": [g.model_dump(mode="json") for g in ds.games],
+        "team_stats": [ts.model_dump(mode="json") for ts in ds.team_stats],
+        "player_stats": [ps.model_dump(mode="json") for ps in ds.player_stats],
+        "availability": [a.model_dump(mode="json") for a in ds.availability],
+    }
+
+
+@pytest.fixture
+def ingested_db(db, sample_dataset, fixed_now):
+    """Database with the full sample dataset ingested (validated)."""
+    DataIngestor(db, now=fixed_now).ingest(raw_from_dataset(sample_dataset))
+    return db
+
+
+@pytest.fixture
+def scheduled_target(ingested_db):
+    """Ingested DB plus a SCHEDULED LAL-BOS game to predict (2024-11-20)."""
+    Repository(ingested_db).insert_game(Game(
+        game_id=TARGET_GAME_ID, league=League.NBA, season="2024-25",
+        game_date=TARGET_GAME_DATE, home_team_id="LAL", away_team_id="BOS",
+        home_score=None, away_score=None, status=GameStatus.SCHEDULED,
+    ))
+    return ingested_db
