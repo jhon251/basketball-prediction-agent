@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "basketball-agent"
+version = "0.1.0"
+description = "Basketball Simulation & Prediction Agent V1 - statistical modeling + Monte Carlo sandbox system"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.5",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["basketball_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["basketball_agent/tests"]
+addopts = "-ra --strict-markers -p no:cacheprovider"
+markers = [
+    "unit: fast unit tests",
+    "integration: tests crossing module boundaries",
+    "regression: expected-output regression tests",
+    "leakage: data-leakage detection tests",
+    "simulation: simulation engine tests",
+]
