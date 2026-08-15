@@ -106,28 +106,8 @@ class ScoreModel:
         )
         p_fga = clamp(1.0 - p_tov - p_fta, cfg.min_fga_p, 1.0)
 
-        # --- exact efficiency scaling to hit the Model C target PPP --------
-        # implied(s) = (A*s + B) / (1 - orb*(1 - C*s))  -> solve for s
-        mix_points = p3a_share * p3 * 3.0 + (1.0 - p3a_share) * p2 * 2.0
-        a = p_fga * mix_points
-        b = p_fta * cfg.fta_per_event * ft
-        c = p3a_share * p3 + (1.0 - p3a_share) * p2  # made rate per unit s
-        numerator = expected_ppp * (1.0 - orb) - b
-        denominator = a - expected_ppp * orb * c
-        scale = (numerator / denominator) if abs(denominator) > 1e-12 else 1.0
-        p2 = clamp(p2 * scale, cfg.min_pct, cfg.max_pct)
-        p3 = clamp(p3 * scale, cfg.min_pct, cfg.max_pct)
-
-        # --- implied PPP with the final parameters -------------------------
-        made = p3a_share * p3 + (1.0 - p3a_share) * p2
-        miss = 1.0 - made
-        per_opp = p_fga * (p3a_share * p3 * 3.0 + (1.0 - p3a_share) * p2 * 2.0) \
-            + p_fta * cfg.fta_per_event * ft
-        denom = 1.0 - miss * orb
-        opportunities = 1.0 / denom if abs(denom) > 1e-12 else 1.0
-        implied = per_opp * opportunities
-
-        return PossessionParams(
+        # --- efficiency scaling to hit the Model C target PPP --------
+        raw = PossessionParams(
             p_tov=p_tov,
             p_fta=p_fta,
             p_fga=p_fga,
@@ -137,5 +117,51 @@ class ScoreModel:
             ft_pct=ft,
             fta_per_event=cfg.fta_per_event,
             orb_pct=orb,
-            expected_ppp=implied,
+            expected_ppp=expected_ppp,
         )
+        return rescale_to_ppp(raw, expected_ppp, cfg)
+
+
+def rescale_to_ppp(
+    params: PossessionParams,
+    target: float,
+    config: ScoreModelConfig | None = None,
+) -> PossessionParams:
+    """Rescale 2PT/3PT percentages so the implied PPP equals ``target``.
+
+    The implied PPP is ``(a*s + b) / (1 - orb*(1 - c*s))`` in the scale ``s``,
+    which is linear — so ``s`` has an exact closed-form solution.  Used both
+    by the score model itself and by the simulation layer's player
+    adjustments (core-player efficiency, injuries).
+    """
+    cfg = config or ScoreModelConfig()
+    p3a = params.p3a_share
+    mix_points = p3a * params.p3_pct * 3.0 + (1.0 - p3a) * params.p2_pct * 2.0
+    a = params.p_fga * mix_points
+    b = params.p_fta * params.fta_per_event * params.ft_pct
+    c = p3a * params.p3_pct + (1.0 - p3a) * params.p2_pct
+    numerator = target * (1.0 - params.orb_pct) - b
+    denominator = a - target * params.orb_pct * c
+    scale = (numerator / denominator) if abs(denominator) > 1e-12 else 1.0
+    p2 = clamp(params.p2_pct * scale, cfg.min_pct, cfg.max_pct)
+    p3 = clamp(params.p3_pct * scale, cfg.min_pct, cfg.max_pct)
+
+    made = p3a * p3 + (1.0 - p3a) * p2
+    miss = 1.0 - made
+    per_opp = params.p_fga * (p3a * p3 * 3.0 + (1.0 - p3a) * p2 * 2.0) \
+        + params.p_fta * params.fta_per_event * params.ft_pct
+    denom = 1.0 - miss * params.orb_pct
+    opportunities = 1.0 / denom if abs(denom) > 1e-12 else 1.0
+    implied = per_opp * opportunities
+    return PossessionParams(
+        p_tov=params.p_tov,
+        p_fta=params.p_fta,
+        p_fga=params.p_fga,
+        p3a_share=p3a,
+        p2_pct=p2,
+        p3_pct=p3,
+        ft_pct=params.ft_pct,
+        fta_per_event=params.fta_per_event,
+        orb_pct=params.orb_pct,
+        expected_ppp=implied,
+    )

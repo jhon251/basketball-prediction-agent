@@ -42,11 +42,15 @@ class WinProbabilityModel:
         expected_pace: float,
         config: WinProbabilityConfig | None = None,
     ) -> float:
-        """Expected margin from the home team's perspective (positive = home)."""
+        """Expected margin from the home team's perspective (positive = home).
+
+        Net rating is points per 100 *team* possessions; each team plays
+        ``expected_pace / 2`` possessions, hence the ``/ 200`` scaling.
+        """
         cfg = config or WinProbabilityConfig()
         strength_home = self.team_strength(home, league, cfg)
         strength_away = self.team_strength(away, league, cfg)
-        return (strength_home - strength_away) * expected_pace / 100.0 + cfg.home_court_advantage
+        return (strength_home - strength_away) * expected_pace / 200.0 + cfg.home_court_advantage
 
     def win_probability(self, margin: float, config: WinProbabilityConfig | None = None) -> float:
         """Logistic win probability for the home team from an expected margin."""

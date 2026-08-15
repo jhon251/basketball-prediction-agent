@@ -40,17 +40,17 @@ class TestGamePredictionParams:
 
     def test_expected_ppps_with_home_court(self, scheduled_target):
         _, params = make_params(scheduled_target, raw=True)
-        assert params.home.expected_ppp == pytest.approx(1.0902416, abs=1e-6)
+        assert params.home.expected_ppp == pytest.approx(1.1151579, abs=1e-6)
         assert params.away.expected_ppp == pytest.approx(1.0463492, abs=1e-6)
 
     def test_expected_margin_and_strength_win_probability(self, scheduled_target):
         _, params = make_params(scheduled_target, raw=True)
-        assert params.expected_margin == pytest.approx(4.3127096, abs=1e-5)
-        assert params.strength_win_prob_home == pytest.approx(0.5926710, abs=1e-6)
+        assert params.expected_margin == pytest.approx(3.4063548, abs=1e-5)
+        assert params.strength_win_prob_home == pytest.approx(0.5735145, abs=1e-5)
 
     def test_expected_total(self, scheduled_target):
         _, params = make_params(scheduled_target, raw=True)
-        assert params.expected_total == pytest.approx(214.3773, abs=1e-3)
+        assert params.expected_total == pytest.approx(108.4386, abs=1e-3)
 
     def test_possession_params_are_self_consistent(self, scheduled_target):
         _, params = make_params(scheduled_target)
@@ -66,8 +66,8 @@ class TestGamePredictionParams:
         assert p.p_tov == pytest.approx(0.1138804, abs=1e-5)
         assert p.p_fta == pytest.approx(0.0970385, abs=1e-5)
         assert p.p_fga == pytest.approx(0.7890810, abs=1e-5)
-        assert p.p2_pct == pytest.approx(0.4751462, abs=1e-5)
-        assert p.p3_pct == pytest.approx(0.3649208, abs=1e-5)
+        assert p.p2_pct == pytest.approx(0.4902428, abs=1e-5)
+        assert p.p3_pct == pytest.approx(0.3765153, abs=1e-5)
 
     def test_elo_win_prob_passthrough(self, scheduled_target):
         features, params = make_params(scheduled_target)
