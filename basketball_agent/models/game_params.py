@@ -55,9 +55,9 @@ def build_game_params(
 ) -> GamePredictionParams:
     """Assemble all model outputs from computed features.
 
-    Home-court advantage is applied as *total points over the game*: each
-    team plays ``pace / 2`` possessions, so the per-possession bonus is
-    ``hca / (pace / 2)``.
+    Home-court advantage is applied as total points over the game: the home
+    team plays ``pace`` possessions, so the per-possession bonus is
+    ``hca / pace``.
     """
     win_config = win_config or WinProbabilityConfig()
     pace_model = PaceModel()
@@ -66,14 +66,13 @@ def build_game_params(
     score_model = ScoreModel()
 
     pace = pace_model.expected_pace(features.home, features.away, features.league, pace_config)
-    team_possessions = pace / 2.0
 
     home_ppp = offense_model.expected_ppp(features.home, features.away, features.league, offense_config)
     # Away PPP = away offense vs home defense (the defensive model is the
     # tested mirror image of the same formula).
     away_ppp = offense_model.expected_ppp(features.away, features.home, features.league, offense_config)
 
-    home_ppp = home_ppp + win_config.home_court_advantage / team_possessions
+    home_ppp = home_ppp + win_config.home_court_advantage / pace
 
     margin = win_model.expected_margin(features.home, features.away, features.league, pace, win_config)
     win_prob = win_model.win_probability(margin, win_config)
@@ -102,7 +101,7 @@ def build_game_params(
         away=away_params,
         expected_pace=pace,
         expected_margin=margin,
-        expected_total=(home_ppp + away_ppp) * team_possessions,
+        expected_total=(home_ppp + away_ppp) * pace,
         elo_win_prob_home=features.elo_win_prob_home,
         strength_win_prob_home=win_prob,
         provenance=features.provenance,

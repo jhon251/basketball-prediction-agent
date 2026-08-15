@@ -19,6 +19,10 @@ class TestSanityOneMirrorMatchup:
         result = MonteCarloRunner(seed=42).run(params, n_simulations=10000)
         assert result.home_win_probability == pytest.approx(0.5, abs=0.02)
         assert result.away_win_probability == pytest.approx(0.5, abs=0.02)
+        # absolute scale guard: league ppp 1.05 x 100 team possessions
+        # -> ~105 points per team, ~210 total (catches factor-2 regressions)
+        assert result.total.mean == pytest.approx(210.0, abs=8.0)
+        assert result.home_score.mean == pytest.approx(105.0, abs=6.0)
 
 
 class TestSanityTwoDominantTeam:

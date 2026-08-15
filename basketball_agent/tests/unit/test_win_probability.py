@@ -27,8 +27,8 @@ class TestWinProbabilityModel:
         margin = model.expected_margin(
             make_team("H", nrtg=5.0), make_team("A", nrtg=2.0), league, 100.0, cfg
         )
-        # each team plays 50 possessions: 3.0 points/100poss * 0.5 + HCA
-        assert margin == pytest.approx(1.5 + 2.5)
+        # each team plays ~100 possessions: 3.0 points/100poss * 1.0 + HCA
+        assert margin == pytest.approx(3.0 + 2.5)
 
     def test_margin_scales_with_pace(self):
         league = make_league()

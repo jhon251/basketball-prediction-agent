@@ -70,7 +70,7 @@ class GameSimulator:
             home_tp.team_id: home_roster or [],
             away_tp.team_id: away_roster or [],
         }
-        seconds_per_possession = REGULATION_SECONDS / params.expected_pace
+        seconds_per_possession = REGULATION_SECONDS / (2.0 * params.expected_pace)
 
         state = GameState(home_team_id=home_tp.team_id, away_team_id=away_tp.team_id)
         cfg = self._config
@@ -169,7 +169,9 @@ class GameSimulator:
         if state.seconds_remaining < 1e-9:
             state.seconds_remaining = 0.0
         state.team_possessions[team] += 1
-        self._track_minutes(state, team, seconds_per_possession, rosters[team])
+        # both teams are on the floor for the whole game clock
+        for team_id, roster in rosters.items():
+            self._track_minutes(state, team_id, seconds_per_possession, roster)
         while True:
             result = resolve_opportunity(rng, tp.possession)
             if result.points:

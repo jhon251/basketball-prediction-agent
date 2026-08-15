@@ -1,5 +1,13 @@
-"""Data collectors (real sources arrive with the data-collection phase).
+"""Data collectors.
 
-V1 collectors must populate the pydantic schemas and stamp every availability
-record with a real ``source_time``.
+Real data sources arrive with the data-collection phase; the V1 sandbox
+includes a synthetic league generator (explicitly labeled as NOT real data)
+so the full pipeline can be exercised end-to-end.
 """
+
+from basketball_agent.data.collectors.synthetic import (
+    SyntheticLeagueConfig,
+    generate_league,
+)
+
+__all__ = ["SyntheticLeagueConfig", "generate_league"]

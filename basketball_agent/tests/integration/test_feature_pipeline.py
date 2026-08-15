@@ -116,6 +116,16 @@ class TestFeaturePipeline:
         assert feats.away_available_share == pytest.approx(1.0)
         assert len(feats.provenance.availability_used) == 2
 
+    def test_window_days_limits_history(self, scheduled_target):
+        # 10-day rolling window from 11-19 covers g2 (11-10) and g3 (11-15)
+        # but excludes g1 (11-06)
+        feats = FeaturePipeline(Repository(scheduled_target), window_days=10.0).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        assert feats.provenance.games_used == ("20241110_LAL_GSW", "20241115_GSW_BOS")
+        assert feats.home.games_played == 1  # LAL: only g2 in window
+        assert feats.away.games_played == 1  # BOS: only g3 in window
+
     def test_decay_lambda_changes_aggregates_in_expected_direction(self, scheduled_target):
         uniform = make_pipeline(scheduled_target, decay_lambda=0.0).compute(
             "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)

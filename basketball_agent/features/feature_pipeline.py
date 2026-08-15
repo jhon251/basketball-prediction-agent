@@ -12,7 +12,7 @@ Leakage discipline (spec §2.2) is structural here:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import GameStatus
@@ -45,12 +45,16 @@ class FeaturePipeline:
         *,
         decay_lambda: float = 0.0,
         elo_config: EloConfig | None = None,
+        window_days: float | None = None,
     ) -> None:
         if decay_lambda < 0:
             raise ValueError("decay_lambda must be >= 0")
+        if window_days is not None and window_days <= 0:
+            raise ValueError("window_days must be positive")
         self._repo = repo
         self._decay_lambda = decay_lambda
         self._elo_config = elo_config or EloConfig()
+        self._window_days = window_days
 
     # ------------------------------------------------------------------ public
 
@@ -141,13 +145,17 @@ class FeaturePipeline:
     def _eligible_history(self, game_id: str, as_of: datetime):
         """FINAL games strictly before as_of, target game excluded.
 
-        Defense in depth on top of the repository's ``as_of`` filter: any
-        violation here raises AssertionError, i.e. FAIL, per spec §2.2.
+        With ``window_days`` set, only games within the rolling window are
+        kept.  Defense in depth on top of the repository's ``as_of`` filter:
+        any violation here raises AssertionError, i.e. FAIL, per spec §2.2.
         """
         history = [
             g for g in self._repo.list_games(as_of=as_of, status=GameStatus.FINAL)
             if g.game_date < as_of and g.game_id != game_id
         ]
+        if self._window_days is not None:
+            window_start = as_of - timedelta(days=self._window_days)
+            history = [g for g in history if g.game_date >= window_start]
         for g in history:
             assert g.game_date < as_of, "leakage: history game at/after as_of"
             assert g.game_id != game_id, "leakage: target game included in its own features"

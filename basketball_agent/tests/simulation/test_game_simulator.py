@@ -52,11 +52,17 @@ class TestGameSimulator:
             assert g.winner in ("home", "away", "tie")
 
     def test_possessions_track_expected_pace(self):
-        params = make_params()  # league 100, teams 100 -> expected pace 100
+        # dominant matchup: overtimes are effectively impossible, so the
+        # possession count must land near 2 x expected_pace (100 per team)
+        from basketball_agent.tests.unit.model_helpers import make_team
+
+        params = make_params(home=make_team("H", ortg=120.0, drtg=90.0),
+                             away=make_team("A", ortg=90.0, drtg=120.0))
         sim = GameSimulator()
         for seed in range(10):
             g = sim.simulate(params, random.Random(seed))
-            assert 95 <= g.home_possessions + g.away_possessions <= 105
+            assert g.overtime_quarters == 0
+            assert 190 <= g.home_possessions + g.away_possessions <= 210
 
     def test_four_quarters_recorded(self):
         g = GameSimulator().simulate(make_params(), random.Random(1))
@@ -74,8 +80,14 @@ class TestGameSimulator:
         assert len(g.quarters) == 4 + 3
 
     def test_overtime_not_played_without_tie(self):
-        g = GameSimulator().simulate(make_params(), random.Random(2))
+        # dominant matchup: regulation decision, no overtime
+        from basketball_agent.tests.unit.model_helpers import make_team
+
+        params = make_params(home=make_team("H", ortg=120.0, drtg=90.0),
+                             away=make_team("A", ortg=90.0, drtg=120.0))
+        g = GameSimulator().simulate(params, random.Random(2))
         assert g.overtime_quarters == 0
+        assert g.winner == "home"
 
     def test_player_minutes_distributed_by_share(self):
         params = make_params()
@@ -87,8 +99,8 @@ class TestGameSimulator:
         m1 = g.player_minutes["p1"]
         m2 = g.player_minutes["p2"]
         assert m2 == pytest.approx(3.0 * m1, rel=1e-9)
-        # each team plays ~48/2 regulation minutes spread over its players
-        assert m1 + m2 == pytest.approx(24.0, abs=0.5)
+        # each team's players are on the floor for all 48 regulation minutes
+        assert m1 + m2 == pytest.approx(48.0, abs=0.5)
 
     def test_roster_efficiency_adjusts_expected_score(self):
         params = make_params()

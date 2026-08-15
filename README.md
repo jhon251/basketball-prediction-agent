@@ -58,7 +58,7 @@ basketball_agent/
 - [x] **Phase 2** — feature pipeline (Elo strength, net/off/def ratings, recent form, pace, shooting, rebounding, turnovers, time decay, rest days, availability)
 - [x] **Phase 3** — models B/C/D/E (team strength + win prob, offense/defense PPP, pace, possession-outcome distribution) assembled into simulation input params
 - [x] **Phase 4** — possession-level simulation engine + Monte Carlo (10k sims ≈ 1.7s), §19 distribution stats, §28 sanity tests
-- [ ] Phase 5 — walk-forward backtest, calibration, baselines, leakage detection
+- [x] **Phase 5** — walk-forward backtest (no random splits), §24 metrics, reliability diagram + ECE, three baselines, automated leakage/reality FAIL checks, decay-lambda sweep, synthetic league test bed
 - [ ] Phase 6 — risk/ensemble agents, `basketball predict` CLI, V1 acceptance
 
 ## Development
