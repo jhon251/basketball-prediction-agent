@@ -54,6 +54,35 @@ class TestFeaturePipeline:
         assert feats.away_available_share == pytest.approx(1.0)
         assert feats.provenance.availability_used == ()
 
+    def test_league_baseline_features(self, scheduled_target):
+        feats = make_pipeline(scheduled_target).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        league = feats.league
+        assert league.n_team_games == 6
+        assert league.ortg == pytest.approx(104.3393, abs=1e-4)
+        assert league.drtg == pytest.approx(104.3393, abs=1e-4)
+        assert league.pace == pytest.approx(99.166667, abs=1e-5)
+        assert league.fga_rate == pytest.approx(0.841906, abs=1e-5)
+        assert league.fta_rate == pytest.approx(0.220355, abs=1e-5)
+        assert league.tov_pct == pytest.approx(0.136272, abs=1e-5)
+        assert league.orb_pct == pytest.approx(0.235645, abs=1e-5)
+        assert league.drb_pct == pytest.approx(0.764355, abs=1e-5)
+        assert league.p3a_share == pytest.approx(0.374619, abs=1e-5)
+        assert league.p2_pct == pytest.approx(0.488921, abs=1e-5)
+        assert league.fg3_pct == pytest.approx(0.364772, abs=1e-5)
+
+    def test_outcome_rate_features(self, scheduled_target):
+        feats = make_pipeline(scheduled_target).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        assert feats.home.fga_rate == pytest.approx(0.824832, abs=1e-5)
+        assert feats.home.fta_rate == pytest.approx(0.219822, abs=1e-5)
+        assert feats.home.p3a_share == pytest.approx(0.376471, abs=1e-5)
+        assert feats.home.p2_pct == pytest.approx(0.504545, abs=1e-5)
+        assert feats.away.fga_rate == pytest.approx(0.890556, abs=1e-5)
+        assert feats.away.p2_pct == pytest.approx(0.485839, abs=1e-5)
+
     def test_form_and_season_aggregates(self, scheduled_target):
         feats = make_pipeline(scheduled_target).compute(
             "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)

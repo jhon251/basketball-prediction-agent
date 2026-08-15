@@ -39,6 +39,11 @@ class TeamFeatureSet:
     # Turnovers
     tov_pct: float | None = None
     opp_tov_pct: float | None = None
+    # Per-possession outcome rates (feed the score model / simulation)
+    fga_rate: float | None = None
+    fta_rate: float | None = None
+    p3a_share: float | None = None
+    p2_pct: float | None = None
     # Recent form
     form_last5_win_pct: float | None = None
     form_last5_avg_margin: float | None = None
@@ -46,6 +51,34 @@ class TeamFeatureSet:
     form_last10_avg_margin: float | None = None
     season_win_pct: float | None = None
     season_avg_margin: float | None = None
+
+
+@dataclass(frozen=True)
+class LeagueFeatureSet:
+    """League-average context computed from the same eligible history.
+
+    Every model's matchup adjustment is expressed relative to these
+    averages, so the whole Phase-3 layer stays pure over ``GameFeatures``.
+    """
+
+    ortg: float | None = None
+    drtg: float | None = None
+    nrtg: float | None = None
+    pace: float | None = None
+    efg_pct: float | None = None
+    ts_pct: float | None = None
+    fg3_pct: float | None = None
+    ft_pct: float | None = None
+    orb_pct: float | None = None
+    drb_pct: float | None = None
+    trb_pct: float | None = None
+    tov_pct: float | None = None
+    opp_tov_pct: float | None = None
+    fga_rate: float | None = None
+    fta_rate: float | None = None
+    p3a_share: float | None = None
+    p2_pct: float | None = None
+    n_team_games: int = 0
 
 
 @dataclass(frozen=True)
@@ -76,6 +109,7 @@ class GameFeatures:
     away_team_id: str
     home: TeamFeatureSet
     away: TeamFeatureSet
+    league: LeagueFeatureSet
     # Pace
     home_pace: float | None
     away_pace: float | None

@@ -42,6 +42,11 @@ class TeamGameDerived:
     trb_pct: float | None
     tov_pct: float | None
     opp_tov_pct: float | None
+    # Per-possession outcome rates (feeds the score model / simulation)
+    fga_rate: float | None = None
+    fta_rate: float | None = None
+    p3a_share: float | None = None
+    p2_pct: float | None = None
 
 
 def derive(
@@ -69,6 +74,10 @@ def derive(
     ortg = _ratio(own.points * 100.0, own.possessions)
     drtg = _ratio(opp.points * 100.0, opp.possessions)
     nrtg = (ortg - drtg) if (ortg is not None and drtg is not None) else None
+    fga_rate = _ratio(own.fga, own.possessions)
+    fta_rate = _ratio(own.fta, own.possessions)
+    p3a_share = _ratio(own.fg3a, own.fga)
+    p2_pct = _ratio(own.fg - own.fg3, own.fga - own.fg3a)
     return TeamGameDerived(
         game_id=game_id,
         game_date=game_date,
@@ -92,4 +101,8 @@ def derive(
         trb_pct=_ratio(own.trb, own.trb + opp.trb),
         tov_pct=_ratio(own.tov, own.possessions),
         opp_tov_pct=_ratio(opp.tov, own.possessions),
+        fga_rate=fga_rate,
+        fta_rate=fta_rate,
+        p3a_share=p3a_share,
+        p2_pct=p2_pct,
     )

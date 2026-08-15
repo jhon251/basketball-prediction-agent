@@ -19,6 +19,7 @@ AGGREGATED_FIELDS = (
     "efg_pct", "ts_pct", "fg3_pct", "ft_pct",
     "orb_pct", "drb_pct", "trb_pct",
     "tov_pct", "opp_tov_pct",
+    "fga_rate", "fta_rate", "p3a_share", "p2_pct",
 )
 
 

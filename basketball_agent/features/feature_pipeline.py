@@ -21,6 +21,7 @@ from basketball_agent.features.base import (
     FeatureComputationError,
     FeatureProvenance,
     GameFeatures,
+    LeagueFeatureSet,
     TeamFeatureSet,
 )
 from basketball_agent.features.player.availability import available_minutes_share
@@ -69,6 +70,7 @@ class FeaturePipeline:
         stats_by_game = self._team_stats_by_game(games_by_id, as_of)
         derived = self._derive_per_team(stats_by_game, games_by_id)
         ratings, _ = compute_ratings(history, self._elo_config)
+        league = self._build_league_features(derived, as_of)
 
         home_features = self._build_team_features(game.home_team_id, derived, ratings, as_of)
         away_features = self._build_team_features(game.away_team_id, derived, ratings, as_of)
@@ -118,6 +120,7 @@ class FeaturePipeline:
             away_team_id=game.away_team_id,
             home=home_features,
             away=away_features,
+            league=league,
             home_pace=home_features.pace,
             away_pace=away_features.pace,
             expected_pace=expected_pace,
@@ -174,6 +177,33 @@ class FeaturePipeline:
             derived[away.team_id].append(d_away)
         return dict(derived)
 
+    def _build_league_features(
+        self, derived: dict[str, list[TeamGameDerived]], as_of: datetime
+    ) -> LeagueFeatureSet:
+        """League averages over every derived team-game row in the history."""
+        all_rows = [row for rows in derived.values() for row in rows]
+        agg = aggregate_team(all_rows, as_of, self._decay_lambda)
+        return LeagueFeatureSet(
+            ortg=agg["ortg"],
+            drtg=agg["drtg"],
+            nrtg=agg["nrtg"],
+            pace=agg["pace"],
+            efg_pct=agg["efg_pct"],
+            ts_pct=agg["ts_pct"],
+            fg3_pct=agg["fg3_pct"],
+            ft_pct=agg["ft_pct"],
+            orb_pct=agg["orb_pct"],
+            drb_pct=agg["drb_pct"],
+            trb_pct=agg["trb_pct"],
+            tov_pct=agg["tov_pct"],
+            opp_tov_pct=agg["opp_tov_pct"],
+            fga_rate=agg["fga_rate"],
+            fta_rate=agg["fta_rate"],
+            p3a_share=agg["p3a_share"],
+            p2_pct=agg["p2_pct"],
+            n_team_games=agg["games_played"],
+        )
+
     def _build_team_features(
         self,
         team_id: str,
@@ -209,6 +239,10 @@ class FeaturePipeline:
             trb_pct=agg["trb_pct"],
             tov_pct=agg["tov_pct"],
             opp_tov_pct=agg["opp_tov_pct"],
+            fga_rate=agg["fga_rate"],
+            fta_rate=agg["fta_rate"],
+            p3a_share=agg["p3a_share"],
+            p2_pct=agg["p2_pct"],
             form_last5_win_pct=form5[0],
             form_last5_avg_margin=form5[1],
             form_last10_win_pct=form10[0],
