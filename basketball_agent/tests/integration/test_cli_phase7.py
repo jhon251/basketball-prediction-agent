@@ -100,7 +100,11 @@ class TestCliIngest:
             encoding="utf-8",
         )
         db_path = tmp_path / "db2" / "basketball.db"
-        code, out, err = run_cli(["ingest", str(csv_path)], {"BASKETBALL_DB_PATH": str(db_path)})
+        code, out, err = run_cli(
+            ["ingest", str(csv_path)],
+            {"BASKETBALL_DB_PATH": str(db_path),
+             "BASKETBALL_RAW_DIR": str(tmp_path / "raw2")},
+        )
         assert code == 1
         assert "FAIL" in err or "ERROR" in err
 
@@ -110,3 +114,78 @@ class TestCliIngest:
         assert code == 0
         assert "Games: 0" in out
         assert "Seasons: n/a" in out
+
+
+class TestCliDataStatus:
+    def test_unavailable_when_no_sources(self, tmp_path):
+        db_path = tmp_path / "db" / "basketball.db"
+        code, out, _ = run_cli(
+            ["data-status"],
+            {"BASKETBALL_DB_PATH": str(db_path),
+             "BASKETBALL_RAW_DIR": str(tmp_path / "raw")},
+        )
+        assert code == 0
+        assert "SOURCE_STATUS:" in out
+        assert "UNAVAILABLE" in out
+        assert "DATA_REQUIREMENTS.md" in out
+
+    def test_available_after_ingest(self, tmp_path):
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        csv_path = tmp_path / "nba.csv"
+        make_real_csv(csv_path, n_games=8)
+        env = {
+            "BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
+            "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
+        }
+        code, out, err = run_cli(["ingest", str(csv_path)], env)
+        assert code == 0, err
+        code, out, _ = run_cli(["data-status"], env)
+        assert code == 0
+        assert "AVAILABLE" in out
+        assert "Latest snapshot:" in out
+        assert "nba_games" in out
+
+
+class TestCliExperiments:
+    def test_experiments_smoke(self, tmp_path):
+        from basketball_agent.data.collectors.synthetic import (
+            SyntheticLeagueConfig, generate_league,
+        )
+        from basketball_agent.data.db.connection import Database
+        from basketball_agent.data.db.loader import DataIngestor
+        from basketball_agent.data.schemas.dataset import Dataset
+        from datetime import datetime, timezone
+
+        teams, players, games, team_stats, player_stats = generate_league(
+            SyntheticLeagueConfig(n_teams=6, games_per_pair=2, seed=2025)
+        )
+        ds = Dataset(
+            games=tuple(games), team_stats=tuple(team_stats), player_stats=tuple(player_stats),
+            teams=tuple(teams), players=tuple(players),
+        )
+        raw = {
+            "teams": [t.model_dump(mode="json") for t in ds.teams],
+            "players": [p.model_dump(mode="json") for p in ds.players],
+            "games": [g.model_dump(mode="json") for g in ds.games],
+            "team_stats": [x.model_dump(mode="json") for x in ds.team_stats],
+            "player_stats": [x.model_dump(mode="json") for x in ds.player_stats],
+        }
+        db_path = tmp_path / "db" / "basketball.db"
+        db = Database(db_path)
+        db.initialize()
+        DataIngestor(db, now=datetime(2025, 2, 1, 12, 0, tzinfo=timezone.utc)).ingest(raw)
+
+        ordered = sorted(ds.games, key=lambda g: (g.game_date, g.game_id))
+        train_cutoff = ordered[15].game_date.isoformat()
+        test_start = ordered[15].game_date.isoformat()
+        code, out, err = run_cli(
+            ["experiments", "--train-cutoff", train_cutoff, "--test-start", test_start,
+             "--n-simulations", "50", "--seed", "7", "--warmup", "2"],
+            {"BASKETBALL_DB_PATH": str(db_path)},
+        )
+        assert code == 0, err
+        assert "FROZEN PARAMETER REPORT" in out
+        for exp_id in ("EXP-NBA-001", "EXP-NBA-002", "EXP-NBA-003", "EXP-NBA-004"):
+            assert exp_id in out

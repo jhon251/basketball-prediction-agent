@@ -120,8 +120,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ing.add_argument("--source", default="nba_games", help="data source name for the raw manifest")
     ing.add_argument("--season", default=None, help="season override (e.g. 2024-25)")
     ing.add_argument("--snapshot-tag", default=None, help="tag for the created snapshot")
+    ing.add_argument("--stats-notes", default=None,
+                     help="stat-definition notes recorded in the processed manifest (spec §6)")
 
     cov = sub.add_parser("coverage", help="print the NBA data coverage report")
+
+    status = sub.add_parser("data-status", help="print SOURCE_STATUS and the snapshot chain")
 
     exp = sub.add_parser("experiments", help="run EXP-NBA-001..004 (strict train/test split)")
     exp.add_argument("--train-cutoff", required=True,
@@ -163,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_ingest(args)
     if args.command == "coverage":
         return _cmd_coverage(args)
+    if args.command == "data-status":
+        return _cmd_data_status(args)
     if args.command == "experiments":
         return _cmd_experiments(args)
 
@@ -205,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_ingest(args) -> int:
-    from basketball_agent.data.collectors.manifest import RawDataStore
+    from basketball_agent.data.collectors.manifest import ProcessedDataStore, RawDataStore
     from basketball_agent.data.collectors.nba_csv import IngestDataError, load_nba_games_csv
     from basketball_agent.data.db.loader import DataIngestor
     from basketball_agent.data.snapshots.manager import SnapshotManager
@@ -217,6 +223,10 @@ def _cmd_ingest(args) -> int:
         manifest = store.register(args.source, args.csv_path)
         raw = load_nba_games_csv(args.csv_path, source=args.source, season=args.season)
         DataIngestor(db).ingest(raw)
+        processed = ProcessedDataStore(settings.processed_dir).save(
+            args.source, raw,
+            description=args.stats_notes or "normalized, validated dataset",
+        )
         snapshot = SnapshotManager(settings.snapshots_dir).create(
             db.path, tag=args.snapshot_tag or f"ingest:{args.source}"
         )
@@ -230,9 +240,43 @@ def _cmd_ingest(args) -> int:
     coverage = build_coverage_report(Repository(db))
     print(f"Ingested {coverage['games']} games from source '{manifest.source}' "
           f"(sha256 {manifest.file_hash[:12]}...).")
+    print(f"Processed dataset: {processed.file_name} (sha256 {processed.file_hash[:12]}...)")
     print(f"Data Snapshot: {snapshot.snapshot_id} (tag: {snapshot.tag})")
     print()
     print(format_coverage_report(coverage))
+    return 0
+
+
+def _cmd_data_status(args) -> int:
+    from basketball_agent.data.collectors.manifest import RawDataStore
+    from basketball_agent.data.snapshots.manager import SnapshotManager
+    from basketball_agent.evaluation.coverage import build_coverage_report
+
+    try:
+        db, settings = _open_db()
+        manifests = RawDataStore(settings.raw_dir).list_sources()
+        snapshots = SnapshotManager(settings.snapshots_dir).list_snapshots()
+        coverage = build_coverage_report(Repository(db))
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print("SOURCE_STATUS:")
+    if manifests:
+        print(f"AVAILABLE ({len(manifests)} registered source file(s))")
+        for m in manifests:
+            print(f"- {m.source} / {m.file_name} — {m.status}, "
+                  f"retrieved {m.retrieved_at[:19]}, sha256 {m.file_hash[:12]}...")
+    else:
+        print("UNAVAILABLE — no raw data sources registered.")
+        print("  Provide a real NBA games CSV and run: "
+              "`basketball ingest <path.csv>` (schema: see DATA_REQUIREMENTS.md).")
+    print(f"Snapshots: {len(snapshots)}")
+    if snapshots:
+        print(f"Latest snapshot: {snapshots[0].snapshot_id} "
+              f"(games {snapshots[0].game_count}, created {snapshots[0].created_at[:19]})")
+    print(f"Database: {coverage['games']} games, {coverage['teams']} teams, "
+          f"range {coverage['date_range']}")
     return 0
 
 

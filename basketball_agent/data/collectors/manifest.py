@@ -115,3 +115,40 @@ class RawDataStore:
             except (json.JSONDecodeError, KeyError, TypeError):
                 continue
         return manifests
+
+
+class ProcessedDataStore:
+    """Writes normalized/validated datasets (JSON) under ``processed/``.
+
+    Raw files stay untouched; the processed copy carries its own manifest so
+    the raw -> processed -> snapshot chain is fully traceable (spec §3).
+    """
+
+    def __init__(self, processed_dir: Path | str) -> None:
+        self.dir = Path(processed_dir)
+
+    def save(
+        self,
+        source: str,
+        dataset: dict,
+        *,
+        description: str | None = None,
+        retrieved_at: datetime | None = None,
+    ) -> DataSourceManifest:
+        retrieved_at = retrieved_at or datetime.now(timezone.utc)
+        target_dir = self.dir / source
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_name = f"dataset_{retrieved_at.strftime('%Y%m%dT%H%M%S')}.json"
+        target = target_dir / file_name
+        target.write_text(
+            json.dumps(dataset, ensure_ascii=False, default=str, indent=2), encoding="utf-8"
+        )
+        manifest = create_manifest(
+            f"{source}/processed", target, status=STATUS_AVAILABLE,
+            description=description or "normalized, validated dataset",
+            retrieved_at=retrieved_at,
+        )
+        (target_dir / f"{file_name}.manifest.json").write_text(
+            json.dumps(asdict(manifest), indent=2), encoding="utf-8"
+        )
+        return manifest

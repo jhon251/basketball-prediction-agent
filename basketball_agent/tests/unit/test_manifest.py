@@ -41,3 +41,21 @@ class TestManifest:
     def test_register_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             RawDataStore(tmp_path / "raw").register("x", tmp_path / "missing.csv")
+
+
+class TestProcessedDataStore:
+    def test_save_writes_dataset_and_manifest(self, tmp_path):
+        from basketball_agent.data.collectors.manifest import ProcessedDataStore
+
+        store = ProcessedDataStore(tmp_path / "processed")
+        manifest = store.save(
+            "nba_games", {"games": [{"game_id": "g1"}], "_meta": {"n_games": 1}},
+            description="normalized with estimated possessions",
+        )
+        assert manifest.status == "AVAILABLE"
+        files = list((tmp_path / "processed" / "nba_games").glob("*.json"))
+        assert len(files) == 2  # dataset + manifest
+        dataset_file = next(f for f in files if not f.name.endswith(".manifest.json"))
+        content = dataset_file.read_text(encoding="utf-8")
+        assert '"game_id": "g1"' in content
+        assert manifest.file_hash == sha256_file(dataset_file)

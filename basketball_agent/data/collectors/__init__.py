@@ -6,6 +6,7 @@ synthetic league generator remains available as a clearly-labeled test bed.
 
 from basketball_agent.data.collectors.manifest import (
     DataSourceManifest,
+    ProcessedDataStore,
     RawDataStore,
     create_manifest,
     sha256_file,
@@ -25,6 +26,7 @@ __all__ = [
     "DataSourceManifest",
     "IngestDataError",
     "NBA_TEAM_IDS",
+    "ProcessedDataStore",
     "RawDataStore",
     "SyntheticLeagueConfig",
     "TEAM_NAMES",
