@@ -136,6 +136,14 @@ def _build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--seed", type=int, default=7)
     exp.add_argument("--warmup", type=int, default=5)
 
+    rep = sub.add_parser("report", help="render the Phase 7 Final Report (spec §21)")
+    rep.add_argument("--train-cutoff", required=True)
+    rep.add_argument("--test-start", required=True)
+    rep.add_argument("--test-end", default=None)
+    rep.add_argument("--n-simulations", type=int, default=300)
+    rep.add_argument("--seed", type=int, default=7)
+    rep.add_argument("--warmup", type=int, default=5)
+
     return parser
 
 
@@ -171,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_data_status(args)
     if args.command == "experiments":
         return _cmd_experiments(args)
+    if args.command == "report":
+        return _cmd_report(args)
 
     if args.command != "predict":
         return 2
@@ -330,6 +340,115 @@ def _cmd_experiments(args) -> int:
             for name, metrics in exp["models"].items():
                 print(f"  {name:10s} acc={metrics['accuracy']:.3f} "
                       f"logloss={metrics['log_loss']:.4f} brier={metrics['brier_score']:.4f}")
+    return 0
+
+
+def _cmd_report(args) -> int:
+    from basketball_agent.data.collectors.manifest import RawDataStore
+    from basketball_agent.data.schemas.base import GameStatus
+    from basketball_agent.evaluation.backtest import (
+        BacktestConfig, BacktestEngine, SimulationPredictor,
+    )
+    from basketball_agent.evaluation.calibration import build_reliability_table
+    from basketball_agent.evaluation.coverage import build_coverage_report
+    from basketball_agent.evaluation.error_analysis import error_analysis
+    from basketball_agent.evaluation.experiments import run_phase7_experiments
+    from basketball_agent.evaluation.metrics import mae
+    from basketball_agent.evaluation.phase7_report import build_phase7_report
+
+    try:
+        db, settings = _open_db()
+        repo = Repository(db)
+        train_cutoff = _parse_as_of(args.train_cutoff)
+        test_start = _parse_as_of(args.test_start)
+        test_end = _parse_as_of(args.test_end) if args.test_end else None
+        if train_cutoff is None or test_start is None:
+            print("FAIL: invalid timestamps", file=sys.stderr)
+            return 1
+
+        results = run_phase7_experiments(
+            repo, train_cutoff, test_start, test_end,
+            n_simulations=args.n_simulations, seed=args.seed, warmup_games=args.warmup,
+        )
+
+        test_ids = [
+            g.game_id for g in repo.list_games(status=GameStatus.FINAL)
+            if g.game_date >= test_start and (test_end is None or g.game_date < test_end)
+        ]
+        sim_result = BacktestEngine(
+            repo,
+            SimulationPredictor(n_simulations=args.n_simulations, seed=args.seed),
+            BacktestConfig(n_simulations=args.n_simulations, seed=args.seed,
+                           warmup_games=args.warmup),
+        ).run(game_ids=test_ids)
+
+        recs = [r for r in sim_result.records
+                if r.prediction is not None and r.actual_home_win is not None]
+        probs = [r.prediction.prob_home for r in recs]
+        outcomes = [r.actual_home_win for r in recs]
+        table = build_reliability_table(probs, outcomes) if recs else []
+
+        score_recs = [r for r in recs
+                      if r.prediction.home_score_mean is not None
+                      and r.prediction.away_score_mean is not None
+                      and r.prediction.expected_margin is not None]
+        score_metrics = {"home_mae": None, "away_mae": None, "total_mae": None, "margin_mae": None}
+        if score_recs:
+            score_metrics = {
+                "home_mae": mae([float(r.actual_home_score) for r in score_recs],
+                                [r.prediction.home_score_mean for r in score_recs]),
+                "away_mae": mae([float(r.actual_away_score) for r in score_recs],
+                                [r.prediction.away_score_mean for r in score_recs]),
+                "total_mae": mae([float(r.actual_total) for r in score_recs],
+                                 [r.prediction.home_score_mean + r.prediction.away_score_mean
+                                  for r in score_recs]),
+                "margin_mae": mae([float(r.actual_margin) for r in score_recs],
+                                  [float(r.prediction.expected_margin) for r in score_recs]),
+            }
+
+        # temporal integrity summary over the test predictions
+        passed = failed = 0
+        for r in recs:
+            if r.prediction.provenance is None:
+                continue
+            for gid in r.prediction.provenance.games_used:
+                game = repo.get_game(gid)
+                if game is not None and game.game_date < r.as_of:
+                    passed += 1
+                else:
+                    failed += 1
+        leakage = {"total": passed + failed, "passed": passed, "failed": failed}
+
+        manifests = RawDataStore(settings.raw_dir).list_sources()
+        coverage = build_coverage_report(repo)
+        report_text = build_phase7_report(
+            source_status={"source": (manifests[0].source if manifests else "n/a"),
+                           "status": "AVAILABLE" if manifests else "UNAVAILABLE"},
+            manifests=manifests,
+            coverage_report=coverage,
+            leakage=leakage,
+            windows={
+                "train": f".. {train_cutoff.date().isoformat()}",
+                "validation": "embedded in train-window walk-forward",
+                "test": f"{test_start.date().isoformat()} .. "
+                        f"{test_end.date().isoformat() if test_end else 'end of data'}",
+            },
+            params=results["fitted_params"],
+            experiments=results,
+            reliability_table=table,
+            score_metrics=score_metrics,
+            error_groups=error_analysis(sim_result, repo),
+            known_limitations=[
+                "data is the registered source only (see SOURCE_STATUS); "
+                "no market baseline available (not fabricated)",
+                "missing-games accounting requires an official schedule reference",
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(report_text)
     return 0
 
 
