@@ -60,6 +60,7 @@ basketball_agent/
 - [x] **Phase 4** — possession-level simulation engine + Monte Carlo (10k sims ≈ 1.7s), §19 distribution stats, §28 sanity tests
 - [x] **Phase 5** — walk-forward backtest (no random splits), §24 metrics, reliability diagram + ECE, three baselines, automated leakage/reality FAIL checks, decay-lambda sweep, synthetic league test bed
 - [x] **Phase 6** — risk agent (confidence + flags), trainable ensemble, prediction agent (reality/leakage gates), prediction settlement loop, `basketball predict` CLI, §32 acceptance checklist tests
+- [~] **Phase 7 (V1.1 real NBA data)** — all offline infrastructure DONE (raw manifests, real-CSV collector with NBA franchise map, coverage report, train-only parameter fitting, EXP-NBA-001..004, error analysis, §21 report, `ingest/coverage/experiments` CLI, full audit chain); **blocked on data**: no NBA data source reachable from this sandbox — see `DATA_REQUIREMENTS.md` (SOURCE_STATUS: UNAVAILABLE) for exactly what to provide.
 
 ## CLI
 
