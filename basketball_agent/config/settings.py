@@ -26,6 +26,9 @@ class Settings:
     storage_dir: Path
     db_path: Path
     snapshots_dir: Path
+    raw_dir: Path
+    processed_dir: Path
+    params_dir: Path
     default_n_simulations: int
     default_seed: int | None
     log_level: str
@@ -38,6 +41,9 @@ class Settings:
             storage_dir=storage,
             db_path=Path(environ.get("BASKETBALL_DB_PATH", str(storage / "basketball.db"))),
             snapshots_dir=Path(environ.get("BASKETBALL_SNAPSHOTS_DIR", str(storage / "snapshots"))),
+            raw_dir=Path(environ.get("BASKETBALL_RAW_DIR", str(storage / "raw"))),
+            processed_dir=Path(environ.get("BASKETBALL_PROCESSED_DIR", str(storage / "processed"))),
+            params_dir=Path(environ.get("BASKETBALL_PARAMS_DIR", str(storage / "params"))),
             default_n_simulations=int(environ.get("BASKETBALL_N_SIMULATIONS", "10000")),
             default_seed=_parse_optional_int(environ.get("BASKETBALL_SEED", "42")),
             log_level=environ.get("BASKETBALL_LOG_LEVEL", "INFO"),

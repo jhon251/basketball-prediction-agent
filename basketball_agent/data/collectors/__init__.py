@@ -1,13 +1,36 @@
 """Data collectors.
 
-Real data sources arrive with the data-collection phase; the V1 sandbox
-includes a synthetic league generator (explicitly labeled as NOT real data)
-so the full pipeline can be exercised end-to-end.
+Real NBA data ingestion lands here (CSV collector + raw manifests); the
+synthetic league generator remains available as a clearly-labeled test bed.
 """
 
+from basketball_agent.data.collectors.manifest import (
+    DataSourceManifest,
+    RawDataStore,
+    create_manifest,
+    sha256_file,
+)
+from basketball_agent.data.collectors.nba_csv import IngestDataError, load_nba_games_csv
+from basketball_agent.data.collectors.nba_teams import (
+    NBA_TEAM_IDS,
+    TEAM_NAMES,
+    canonical_team_id,
+)
 from basketball_agent.data.collectors.synthetic import (
     SyntheticLeagueConfig,
     generate_league,
 )
 
-__all__ = ["SyntheticLeagueConfig", "generate_league"]
+__all__ = [
+    "DataSourceManifest",
+    "IngestDataError",
+    "NBA_TEAM_IDS",
+    "RawDataStore",
+    "SyntheticLeagueConfig",
+    "TEAM_NAMES",
+    "canonical_team_id",
+    "create_manifest",
+    "generate_league",
+    "load_nba_games_csv",
+    "sha256_file",
+]

@@ -29,7 +29,7 @@ from basketball_agent.features.feature_pipeline import FeaturePipeline
 from basketball_agent.models.game_params import build_game_params
 from basketball_agent.models.offensive_model import OffensiveModel
 from basketball_agent.models.pace_model import PaceModel
-from basketball_agent.models.win_probability import WinProbabilityModel
+from basketball_agent.models.win_probability import WinProbabilityConfig, WinProbabilityModel
 from basketball_agent.simulation.monte_carlo import MonteCarloRunner
 
 
@@ -89,13 +89,17 @@ class EloPredictor:
 class StrengthPredictor:
     """Model B as a standalone analytic baseline (margin + win prob + total)."""
 
+    def __init__(self, config: WinProbabilityConfig | None = None) -> None:
+        self._config = config or WinProbabilityConfig()
+
     def predict(self, features: GameFeatures) -> Prediction:
+        cfg = self._config
         win_model = WinProbabilityModel()
         pace = PaceModel().expected_pace(features.home, features.away, features.league)
-        margin = win_model.expected_margin(features.home, features.away, features.league, pace)
-        prob = win_model.win_probability(margin)
+        margin = win_model.expected_margin(features.home, features.away, features.league, pace, cfg)
+        prob = win_model.win_probability(margin, cfg)
         home_ppp = OffensiveModel().expected_ppp(features.home, features.away, features.league) \
-            + 2.5 / pace
+            + cfg.home_court_advantage / pace
         away_ppp = OffensiveModel().expected_ppp(features.away, features.home, features.league)
         return Prediction(
             game_id=features.game_id, as_of=features.as_of,
