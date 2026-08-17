@@ -1,7 +1,7 @@
 """Data collectors.
 
-Real NBA data ingestion lands here (CSV collector + raw manifests); the
-synthetic league generator remains available as a clearly-labeled test bed.
+Real NBA data ingestion lands here (CSV/Parquet collectors + raw manifests);
+the synthetic league generator remains available as a clearly-labeled test bed.
 """
 
 from basketball_agent.data.collectors.manifest import (
@@ -11,7 +11,17 @@ from basketball_agent.data.collectors.manifest import (
     create_manifest,
     sha256_file,
 )
-from basketball_agent.data.collectors.nba_csv import IngestDataError, load_nba_games_csv
+from basketball_agent.data.collectors.nba_csv import (
+    IngestDataError,
+    load_nba_games_csv,
+    write_canonical_csv,
+)
+from basketball_agent.data.collectors.nba_parquet import (
+    load_nba_games_file,
+    load_nba_games_parquet,
+    merge_raw_datasets,
+    normalize_dataframe,
+)
 from basketball_agent.data.collectors.nba_teams import (
     NBA_TEAM_IDS,
     TEAM_NAMES,
@@ -34,5 +44,10 @@ __all__ = [
     "create_manifest",
     "generate_league",
     "load_nba_games_csv",
+    "load_nba_games_file",
+    "load_nba_games_parquet",
+    "merge_raw_datasets",
+    "normalize_dataframe",
     "sha256_file",
+    "write_canonical_csv",
 ]

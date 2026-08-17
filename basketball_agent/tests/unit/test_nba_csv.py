@@ -111,3 +111,58 @@ class TestRowPerTeamLayout:
         with pytest.raises(IngestDataError) as exc:
             load_nba_games_csv(f)
         assert "odd number" in str(exc.value)
+
+
+class TestNbaDataStyleAliases:
+    def test_visitor_and_made_shot_naming(self, tmp_path):
+        f = tmp_path / "games.csv"
+        f.write_text(
+            "game_id,game_date,home_team_id,visitor_team_id,home_score,visitor_score,"
+            "fgm_home,fga_home,fg3m_home,fg3a_home,ftm_home,fta_home,orb_home,drb_home,trb_home,"
+            "fgm_visitor,fga_visitor,fg3m_visitor,fg3a_visitor,ftm_visitor,fta_visitor,"
+            "orb_visitor,drb_visitor,trb_visitor\n"
+            "g1,2024-10-25,LAL,BOS,112,105,"
+            "40,85,12,30,20,24,9,33,42,"
+            "38,88,13,36,16,20,10,30,40\n",
+            encoding="utf-8",
+        )
+        raw = load_nba_games_csv(f)
+        dataset, errors = parse_dataset(raw)
+        assert not errors
+        g = dataset.games[0]
+        assert g.home_team_id == "LAL" and g.away_team_id == "BOS"
+        assert g.home_score == 112 and g.away_score == 105
+        lal = [t for t in dataset.team_stats if t.team_id == "LAL"][0]
+        bos = [t for t in dataset.team_stats if t.team_id == "BOS"][0]
+        assert lal.fg == 40 and lal.fg3 == 12 and lal.ft == 20 and lal.trb == 42
+        assert bos.fg == 38 and bos.fg3 == 13 and bos.ft == 16 and bos.trb == 40
+
+    def test_3pm_alias_row_per_team(self, tmp_path):
+        f = tmp_path / "games.csv"
+        f.write_text(
+            "date,team,is_home,score,fgm,fga,3pm,fg3a,ftm,fta,orb,drb,trb,ast,tov,stl,blk,pf\n"
+            "2024-11-01,LAL,1,110,39,84,11,29,21,25,10,32,42,24,13,7,5,18\n"
+            "2024-11-01,BOS,0,103,37,86,14,35,15,19,9,30,39,21,15,6,4,20\n",
+            encoding="utf-8",
+        )
+        dataset, errors = parse_dataset(load_nba_games_csv(f))
+        assert not errors
+        lal = [t for t in dataset.team_stats if t.team_id == "LAL"][0]
+        assert lal.fg == 39 and lal.fg3 == 11 and lal.ft == 21
+
+
+class TestCanonicalCsvWriter:
+    def test_roundtrip(self, tmp_path):
+        from basketball_agent.data.collectors.nba_csv import write_canonical_csv
+
+        src = tmp_path / "in.csv"
+        src.write_text(GAME_PER_ROW_CSV, encoding="utf-8")
+        raw = load_nba_games_csv(src)
+        out = tmp_path / "canonical.csv"
+        write_canonical_csv(raw, out)
+        roundtrip, errors = parse_dataset(load_nba_games_csv(out))
+        original, _ = parse_dataset(raw)
+        assert not errors
+        assert len(roundtrip.games) == len(original.games)
+        assert roundtrip.games == original.games
+        assert roundtrip.team_stats == original.team_stats

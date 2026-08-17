@@ -148,6 +148,98 @@ class TestCliDataStatus:
         assert "nba_games" in out
 
 
+class TestCliMultiFileAndValidate:
+    def test_multi_file_ingest_merges(self, tmp_path):
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        f1 = tmp_path / "week1.csv"
+        f2 = tmp_path / "week2.csv"
+        make_real_csv(f1, n_games=6)
+        # second file: continue the schedule with distinct dates (offset 30 days)
+        import io
+
+        lines = f2.read_text(encoding="utf-8") if f2.exists() else ""
+        make_real_csv(f2, n_games=6)
+        content = f2.read_text(encoding="utf-8").splitlines()
+        # shift dates of file2 forward by 30 days to avoid duplicate game ids
+        shifted = []
+        for line in content:
+            if line.startswith("game_date") or not line.strip():
+                shifted.append(line)
+                continue
+            parts = line.split(",")
+            from datetime import datetime as _dt, timedelta as _td
+
+            d = _dt.strptime(parts[0], "%Y-%m-%d") + _td(days=30)
+            parts[0] = d.strftime("%Y-%m-%d")
+            shifted.append(",".join(parts))
+        f2.write_text("\n".join(shifted) + "\n", encoding="utf-8")
+
+        env = {
+            "BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
+            "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
+        }
+        code, out, err = run_cli(["ingest", str(f1), str(f2)], env)
+        assert code == 0, err
+        assert "Ingested 12 games from 2 file(s)" in out
+        # both raw files archived with manifests
+        assert (tmp_path / "raw" / "nba_games" / "week1.csv").exists()
+        assert (tmp_path / "raw" / "nba_games" / "week2.csv").exists()
+
+    def test_cross_file_duplicate_fails(self, tmp_path):
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        f1 = tmp_path / "a.csv"
+        f2 = tmp_path / "b.csv"
+        make_real_csv(f1, n_games=4)
+        make_real_csv(f2, n_games=4)  # same rows -> cross-file duplicate game ids
+        env = {"BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
+               "BASKETBALL_RAW_DIR": str(tmp_path / "raw")}
+        code, out, err = run_cli(["ingest", str(f1), str(f2)], env)
+        assert code == 1
+        assert "FAIL" in err or "ERROR" in err
+
+    def test_validate_pass(self, tmp_path):
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        csv_path = tmp_path / "good.csv"
+        make_real_csv(csv_path, n_games=6)
+        code, out, err = run_cli(["validate", str(csv_path)], {})
+        assert code == 0, err
+        assert "RESULT: PASS" in out
+
+    def test_validate_fail(self, tmp_path):
+        csv_path = tmp_path / "bad.csv"
+        csv_path.write_text(
+            "game_date,home_team,away_team,home_score,away_score,home_fg,home_fga,"
+            "home_fg3,home_fg3a,home_ft,home_fta,home_orb,home_drb,home_trb,"
+            "away_fg,away_fga,away_fg3,away_fg3a,away_ft,away_fta,away_orb,away_drb,away_trb\n"
+            "2024-10-25,LAL,BOS,999,105,40,85,12,30,20,24,9,33,42,"
+            "38,88,13,36,16,20,10,30,40\n",  # points identity broken -> FAIL
+            encoding="utf-8",
+        )
+        code, out, err = run_cli(["validate", str(csv_path)], {})
+        assert code == 1
+        assert "RESULT: FAIL" in out
+
+    def test_convert_instructive_error_without_parquet_libs(self, tmp_path):
+        target = tmp_path / "x.parquet"
+        target.write_bytes(b"PAR1-not-a-real-parquet")
+        try:
+            import duckdb  # noqa: F401
+            import pyarrow  # noqa: F401
+
+            pytest.skip("duckdb/pyarrow available")
+        except ImportError:
+            pass
+        code, out, err = run_cli(
+            ["convert", str(target), "--out", str(tmp_path / "out.csv")], {}
+        )
+        assert code == 1
+        assert "duckdb" in err
+
+
 class TestCliExperiments:
     def test_experiments_smoke(self, tmp_path):
         from basketball_agent.data.collectors.synthetic import (

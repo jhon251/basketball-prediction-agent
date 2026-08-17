@@ -24,6 +24,7 @@ ESTIMATE in the source description.
 from __future__ import annotations
 
 import csv
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,22 +46,38 @@ COLUMN_ALIASES: dict[str, str] = {
     "game_id": "game_id", "gameid": "game_id",
     "season": "season", "year": "season",
     "home_team": "home_team", "home": "home_team", "home_abbr": "home_team",
-    "home_team_abbreviation": "home_team", "ht": "home_team",
+    "home_team_abbreviation": "home_team", "ht": "home_team", "home_team_id": "home_team",
     "away_team": "away_team", "away": "away_team", "away_abbr": "away_team",
-    "away_team_abbreviation": "away_team", "at": "away_team",
+    "away_team_abbreviation": "away_team", "at": "away_team", "away_team_id": "away_team",
+    "visitor_team": "away_team", "visitor": "away_team", "visitor_abbr": "away_team",
+    "visitor_team_abbreviation": "away_team", "visitor_team_id": "away_team",
     "home_score": "home_score", "home_pts": "home_score", "home_points": "home_score",
     "pts_home": "home_score", "home_team_score": "home_score",
     "away_score": "away_score", "away_pts": "away_score", "away_points": "away_score",
     "pts_away": "away_score", "away_team_score": "away_score",
+    "visitor_score": "away_score", "visitor_pts": "away_score",
+    "visitor_points": "away_score", "pts_visitor": "away_score",
     "team": "team", "team_id": "team", "team_abbreviation": "team",
     "is_home": "is_home", "home_away": "is_home", "location": "is_home",
     "score": "score", "pts": "score", "points": "score",
+    # made-shot naming (nba_data / llimllib style): FGM/FG3M/FTM
+    "fgm": "fg", "ftm": "ft", "fg3m": "fg3", "3pm": "fg3",
 }
 for _side in ("home", "away"):
     for _stat in STAT_COLUMNS:
         _canon = f"{_side}_{_stat}"
         for _alias in (_canon, f"{_side[0]}_{_stat}", f"{_stat}_{_side}"):
             COLUMN_ALIASES.setdefault(_alias, _canon)
+# nba_data / llimllib style: <stat>_<side> and <side>_<stat> with side in
+# {home, away, visitor}, plus made-shot names (fgm_home -> home_fg,
+# fg3m_visitor -> away_fg3, ...)
+for _side_label, _side in (("home", "home"), ("away", "away"), ("visitor", "away")):
+    for _stat in STAT_COLUMNS:
+        COLUMN_ALIASES.setdefault(f"{_side_label}_{_stat}", f"{_side}_{_stat}")
+        COLUMN_ALIASES.setdefault(f"{_stat}_{_side_label}", f"{_side}_{_stat}")
+    for _alias, _canon in (("fgm", "fg"), ("ftm", "ft"), ("fg3m", "fg3")):
+        COLUMN_ALIASES.setdefault(f"{_side_label}_{_alias}", f"{_side}_{_canon}")
+        COLUMN_ALIASES.setdefault(f"{_alias}_{_side_label}", f"{_side}_{_canon}")
 for _stat in STAT_COLUMNS:
     COLUMN_ALIASES.setdefault(_stat, _stat)
 
@@ -98,7 +115,9 @@ def _score_int(raw: Any, column: str) -> int:
 
 
 def _stat_float(raw: Any, column: str) -> float | None:
-    if raw is None or str(raw).strip() == "":
+    if raw is None or (isinstance(raw, float) and math.isnan(raw)):
+        return None
+    if str(raw).strip() == "":
         return None
     try:
         return float(str(raw).strip())
@@ -194,8 +213,14 @@ def load_nba_games_csv(
     if not raw_rows:
         raise IngestDataError("csv contains no data rows")
 
-    # detect layout: home/away team or score columns -> game-per-row
-    has_game_layout = any(k in columns for k in ("home_team", "away_team", "home_score", "away_score"))
+    return _load_records(raw_rows, columns, season)
+
+
+def _load_records(raw_rows: list[dict], columns: dict[str, str], season: str | None) -> dict:
+    """Layout dispatch shared by the CSV and Parquet loaders."""
+    has_game_layout = any(
+        k in columns for k in ("home_team", "away_team", "home_score", "away_score")
+    )
     if has_game_layout:
         return _parse_game_per_row(raw_rows, columns, season)
     return _parse_row_per_team(raw_rows, columns, season)
@@ -351,3 +376,47 @@ def _finalize(
             "possessions_estimated_for": len(estimated),
         },
     }
+
+
+def write_canonical_csv(raw: dict, path: Path | str) -> None:
+    """Write a normalized raw dataset back to the canonical game-per-row CSV.
+
+    Used by the offline Parquet -> CSV conversion so any Parquet source can
+    feed the standard CSV pipeline without touching the core models.
+    """
+    path = Path(path)
+    games = {g["game_id"]: g for g in raw["games"]}
+    stats_by_game: dict[str, dict[str, dict]] = {}
+    for ts in raw["team_stats"]:
+        stats_by_game.setdefault(ts["game_id"], {})[ts["team_id"]] = ts
+
+    headers = (["game_date", "home_team", "away_team", "home_score", "away_score"]
+               + [f"home_{s}" for s in STAT_COLUMNS]
+               + [f"away_{s}" for s in STAT_COLUMNS])
+
+    def fmt(value: Any) -> str:
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        return str(value)
+
+    rows: list[dict[str, str]] = []
+    for game in games.values():
+        home = stats_by_game.get(game["game_id"], {}).get(game["home_team_id"])
+        away = stats_by_game.get(game["game_id"], {}).get(game["away_team_id"])
+        row = {
+            "game_date": fmt(game.get("game_date", "")),
+            "home_team": fmt(game.get("home_team_id", "")),
+            "away_team": fmt(game.get("away_team_id", "")),
+            "home_score": fmt(game.get("home_score", "")),
+            "away_score": fmt(game.get("away_score", "")),
+        }
+        for side, ts in (("home", home), ("away", away)):
+            for stat in STAT_COLUMNS:
+                row[f"{side}_{stat}"] = fmt(ts.get(stat, 0)) if ts else "0"
+        rows.append(row)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)

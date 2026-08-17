@@ -115,13 +115,22 @@ def _build_parser() -> argparse.ArgumentParser:
     v = sub.add_parser("version", help="print the model version")
     v.add_argument("--quiet", action="store_true")
 
-    ing = sub.add_parser("ingest", help="ingest a real NBA games CSV (raw preserved, snapshot created)")
-    ing.add_argument("csv_path", help="path to the NBA games CSV")
+    ing = sub.add_parser("ingest", help="ingest real NBA data files (CSV/Parquet; raw preserved, snapshot created)")
+    ing.add_argument("paths", nargs="+", help="one or more CSV/Parquet files")
     ing.add_argument("--source", default="nba_games", help="data source name for the raw manifest")
     ing.add_argument("--season", default=None, help="season override (e.g. 2024-25)")
     ing.add_argument("--snapshot-tag", default=None, help="tag for the created snapshot")
     ing.add_argument("--stats-notes", default=None,
                      help="stat-definition notes recorded in the processed manifest (spec §6)")
+
+    val = sub.add_parser("validate", help="parse + validate data files WITHOUT writing to the DB")
+    val.add_argument("paths", nargs="+", help="one or more CSV/Parquet files")
+    val.add_argument("--season", default=None, help="season override (e.g. 2024-25)")
+
+    conv = sub.add_parser("convert", help="convert a local Parquet to the canonical CSV (offline)")
+    conv.add_argument("parquet_path", help="path to the Parquet file")
+    conv.add_argument("--out", required=True, help="output CSV path")
+    conv.add_argument("--season", default=None, help="season override")
 
     cov = sub.add_parser("coverage", help="print the NBA data coverage report")
 
@@ -173,6 +182,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ingest":
         return _cmd_ingest(args)
+    if args.command == "validate":
+        return _cmd_validate(args)
+    if args.command == "convert":
+        return _cmd_convert(args)
     if args.command == "coverage":
         return _cmd_coverage(args)
     if args.command == "data-status":
@@ -222,7 +235,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_ingest(args) -> int:
     from basketball_agent.data.collectors.manifest import ProcessedDataStore, RawDataStore
-    from basketball_agent.data.collectors.nba_csv import IngestDataError, load_nba_games_csv
+    from basketball_agent.data.collectors.nba_csv import IngestDataError
+    from basketball_agent.data.collectors.nba_parquet import (
+        load_nba_games_file,
+        merge_raw_datasets,
+    )
     from basketball_agent.data.db.loader import DataIngestor
     from basketball_agent.data.snapshots.manager import SnapshotManager
     from basketball_agent.evaluation.coverage import build_coverage_report, format_coverage_report
@@ -230,11 +247,14 @@ def _cmd_ingest(args) -> int:
     try:
         db, settings = _open_db()
         store = RawDataStore(settings.raw_dir)
-        manifest = store.register(args.source, args.csv_path)
-        raw = load_nba_games_csv(args.csv_path, source=args.source, season=args.season)
-        DataIngestor(db).ingest(raw)
+        raws = []
+        for path in args.paths:
+            store.register(args.source, path)  # verbatim copy + SHA-256 manifest per file
+            raws.append(load_nba_games_file(path, season=args.season))
+        merged = merge_raw_datasets(raws)
+        DataIngestor(db).ingest(merged)
         processed = ProcessedDataStore(settings.processed_dir).save(
-            args.source, raw,
+            args.source, merged,
             description=args.stats_notes or "normalized, validated dataset",
         )
         snapshot = SnapshotManager(settings.snapshots_dir).create(
@@ -248,12 +268,62 @@ def _cmd_ingest(args) -> int:
         return 1
 
     coverage = build_coverage_report(Repository(db))
-    print(f"Ingested {coverage['games']} games from source '{manifest.source}' "
-          f"(sha256 {manifest.file_hash[:12]}...).")
+    print(f"Ingested {coverage['games']} games from {len(args.paths)} file(s) "
+          f"of source '{args.source}'.")
     print(f"Processed dataset: {processed.file_name} (sha256 {processed.file_hash[:12]}...)")
     print(f"Data Snapshot: {snapshot.snapshot_id} (tag: {snapshot.tag})")
     print()
     print(format_coverage_report(coverage))
+    return 0
+
+
+def _cmd_validate(args) -> int:
+    from basketball_agent.agents.validation_agent import DataValidationAgent
+    from basketball_agent.data.collectors.nba_csv import IngestDataError
+    from basketball_agent.data.collectors.nba_parquet import (
+        load_nba_games_file,
+        merge_raw_datasets,
+    )
+    from basketball_agent.data.validators.parsing import parse_dataset
+
+    try:
+        raws = [load_nba_games_file(p, season=args.season) for p in args.paths]
+        merged = merge_raw_datasets(raws)
+        dataset, parse_errors = parse_dataset(merged)
+        report = DataValidationAgent().validate(dataset)
+    except (IngestDataError, FileNotFoundError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    if parse_errors:
+        print(f"FAIL: {len(parse_errors)} parse error(s):")
+        for error in parse_errors[:10]:
+            print(f"  - [{error.record_type} #{error.index}] {error.message.splitlines()[0]}")
+        return 1
+
+    print(f"files: {len(args.paths)} | games: {len(dataset.games)} | "
+          f"team_stats: {len(dataset.team_stats)}")
+    print(report.to_text())
+    if report.has_errors:
+        print(f"RESULT: FAIL ({len(report.errors)} errors, {len(report.warnings)} warnings)")
+        return 1
+    print(f"RESULT: PASS (0 errors, {len(report.warnings)} warnings)")
+    return 0
+
+
+def _cmd_convert(args) -> int:
+    from basketball_agent.data.collectors.nba_csv import IngestDataError, write_canonical_csv
+    from basketball_agent.data.collectors.nba_parquet import load_nba_games_parquet
+
+    try:
+        raw = load_nba_games_parquet(args.parquet_path, season=args.season)
+        write_canonical_csv(raw, args.out)
+    except (IngestDataError, FileNotFoundError, ImportError, OSError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Converted {raw['_meta']['n_games']} games -> {args.out}")
+    print("Next: `basketball validate <csv>` then `basketball ingest <csv>`.")
     return 0
 
 
