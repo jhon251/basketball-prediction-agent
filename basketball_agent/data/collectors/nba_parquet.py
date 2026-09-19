@@ -38,7 +38,10 @@ def read_parquet_frame(path: Path | str):
     except ImportError:
         duckdb = None
     if duckdb is not None:
-        return duckdb.read_parquet(str(path)).df()
+        try:
+            return duckdb.read_parquet(str(path)).df()
+        except Exception as exc:  # noqa: BLE001 — unreadable file must be a clean FAIL
+            raise IngestDataError(f"could not read Parquet file {path}: {exc}") from exc
 
     try:
         import pandas as pd  # type: ignore[import-not-found]
@@ -52,6 +55,8 @@ def read_parquet_frame(path: Path | str):
             "(2) convert offline first: `basketball convert <file.parquet> --out games.csv` "
             "and then use the standard CSV ingest path."
         ) from exc
+    except Exception as exc:  # noqa: BLE001 — unreadable file must be a clean FAIL
+        raise IngestDataError(f"could not read Parquet file {path}: {exc}") from exc
 
 
 def _clean_value(value: Any) -> Any:

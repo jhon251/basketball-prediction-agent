@@ -10,10 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.5",
-    "numpy>=1.26",
+    # pandas (+ a parquet engine: duckdb, or pyarrow) is only needed for the
+    # Parquet ingest path (basketball_agent.data.collectors.nba_parquet).
+    # numpy/scipy/scikit-learn are intentionally NOT declared: no source
+    # module imports them (verified Phase 8-A).
     "pandas>=2.1",
-    "scipy>=1.11",
-    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]

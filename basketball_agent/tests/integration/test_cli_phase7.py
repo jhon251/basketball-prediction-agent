@@ -78,6 +78,7 @@ class TestCliIngest:
         env = {
             "BASKETBALL_DB_PATH": str(db_path),
             "BASKETBALL_RAW_DIR": str(raw_dir),
+            "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed"),
             "BASKETBALL_SNAPSHOTS_DIR": str(snap_dir),
         }
         code, out, err = run_cli(
@@ -90,6 +91,8 @@ class TestCliIngest:
         # raw copy preserved
         assert (raw_dir / "nba_games" / "nba.csv").exists()
         assert (raw_dir / "nba_games" / "nba.csv.manifest.json").exists()
+        # processed dataset must land in the redirected dir, never the real storage
+        assert list((tmp_path / "processed" / "nba_games").glob("dataset_*.json"))
 
     def test_ingest_validation_failure_blocks(self, tmp_path):
         csv_path = tmp_path / "bad.csv"
@@ -103,10 +106,13 @@ class TestCliIngest:
         code, out, err = run_cli(
             ["ingest", str(csv_path)],
             {"BASKETBALL_DB_PATH": str(db_path),
-             "BASKETBALL_RAW_DIR": str(tmp_path / "raw2")},
+             "BASKETBALL_RAW_DIR": str(tmp_path / "raw2"),
+             "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed2")},
         )
         assert code == 1
         assert "FAIL" in err or "ERROR" in err
+        # blocked ingest must not leave processed artifacts either
+        assert not (tmp_path / "processed2").exists()
 
     def test_coverage_empty_db(self, tmp_path):
         db_path = tmp_path / "db3" / "basketball.db"
@@ -137,6 +143,7 @@ class TestCliDataStatus:
         env = {
             "BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
             "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed"),
             "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
         }
         code, out, err = run_cli(["ingest", str(csv_path)], env)
@@ -178,6 +185,7 @@ class TestCliMultiFileAndValidate:
         env = {
             "BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
             "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed"),
             "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
         }
         code, out, err = run_cli(["ingest", str(f1), str(f2)], env)
@@ -195,7 +203,8 @@ class TestCliMultiFileAndValidate:
         make_real_csv(f1, n_games=4)
         make_real_csv(f2, n_games=4)  # same rows -> cross-file duplicate game ids
         env = {"BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
-               "BASKETBALL_RAW_DIR": str(tmp_path / "raw")}
+               "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+               "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed")}
         code, out, err = run_cli(["ingest", str(f1), str(f2)], env)
         assert code == 1
         assert "FAIL" in err or "ERROR" in err
@@ -223,21 +232,101 @@ class TestCliMultiFileAndValidate:
         assert code == 1
         assert "RESULT: FAIL" in out
 
-    def test_convert_instructive_error_without_parquet_libs(self, tmp_path):
-        target = tmp_path / "x.parquet"
-        target.write_bytes(b"PAR1-not-a-real-parquet")
+    def _parquet_engine_available(self) -> bool:
         try:
             import duckdb  # noqa: F401
-            import pyarrow  # noqa: F401
 
-            pytest.skip("duckdb/pyarrow available")
+            return True
         except ImportError:
             pass
+        try:
+            import pandas  # noqa: F401
+            import pyarrow  # noqa: F401
+
+            return True
+        except ImportError:
+            return False
+
+    def test_convert_invalid_parquet_fails_cleanly(self, tmp_path):
+        """`convert` on a non-Parquet file must exit 1 with a clean CLI
+        message — no traceback, no silent success — regardless of whether a
+        parquet engine is installed:
+
+        * engine present -> the underlying parse error is reported as FAIL;
+        * no engine -> the instructive "requires duckdb / convert offline"
+          hint is shown instead.
+        """
+        target = tmp_path / "x.parquet"
+        target.write_bytes(b"PAR1-not-a-real-parquet")
         code, out, err = run_cli(
             ["convert", str(target), "--out", str(tmp_path / "out.csv")], {}
         )
         assert code == 1
-        assert "duckdb" in err
+        assert err.strip(), "expected a diagnostic message on stderr"
+        if self._parquet_engine_available():
+            assert err.startswith("FAIL")
+            assert "parquet" in err.lower()
+        else:
+            assert err.startswith("FAIL")
+            assert "duckdb" in err
+            assert "convert" in err
+        assert not (tmp_path / "out.csv").exists()
+
+    def test_settle_no_predictions_fails(self, tmp_path):
+        """`settle` on a FINAL game without saved predictions is a clean FAIL."""
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        csv_path = tmp_path / "nba.csv"
+        make_real_csv(csv_path, n_games=8)
+        env = {
+            "BASKETBALL_DB_PATH": str(tmp_path / "db" / "basketball.db"),
+            "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed"),
+            "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
+        }
+        code, _, err = run_cli(["ingest", str(csv_path)], env)
+        assert code == 0, err
+        code, out, err = run_cli(["settle", "20241025_LAL_BOS"],
+                                 {"BASKETBALL_DB_PATH": str(env["BASKETBALL_DB_PATH"])})
+        assert code == 1
+        assert "no unsettled predictions" in err
+
+    def test_settle_saved_prediction_roundtrip(self, tmp_path):
+        """`settle` completes the CLI chain: save (via API) -> settle -> report."""
+        from basketball_agent.data.db.connection import Database
+        from basketball_agent.data.db.repository import Repository
+        from basketball_agent.agents.prediction_agent import PredictionAgent
+        from basketball_agent.evaluation.settlement import SettlementStore
+        from basketball_agent.tests.integration.test_real_data_pipeline import make_real_csv
+
+        csv_path = tmp_path / "nba.csv"
+        make_real_csv(csv_path, n_games=24)
+        db_path = tmp_path / "db" / "basketball.db"
+        env = {
+            "BASKETBALL_DB_PATH": str(db_path),
+            "BASKETBALL_RAW_DIR": str(tmp_path / "raw"),
+            "BASKETBALL_PROCESSED_DIR": str(tmp_path / "processed"),
+            "BASKETBALL_SNAPSHOTS_DIR": str(tmp_path / "snapshots"),
+        }
+        code, _, err = run_cli(["ingest", str(csv_path)], env)
+        assert code == 0, err
+
+        # save a pre-game prediction for a mid-series FINAL game via the API
+        repo = Repository(Database(db_path))
+        games = sorted(repo.list_games(), key=lambda g: (g.game_date, g.game_id))
+        target = games[len(games) // 2]
+        as_of = target.game_date.replace(hour=0)  # tip-off minus a day
+        prediction = PredictionAgent(repo, n_simulations=60, seed=42).predict(
+            target.game_id, as_of=as_of
+        )
+        SettlementStore(Database(db_path)).save(prediction)
+
+        code, out, err = run_cli(["settle", target.game_id],
+                                 {"BASKETBALL_DB_PATH": str(db_path)})
+        assert code == 0, err
+        assert "Settled" in out
+        assert "Aggregate" in out
+        assert "'n_settled': 1" in out
 
 
 class TestCliExperiments:

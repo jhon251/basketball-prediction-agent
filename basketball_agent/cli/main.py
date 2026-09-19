@@ -112,6 +112,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--save", action="store_true",
                    help="persist the prediction for later settlement")
 
+    st = sub.add_parser("settle", help="settle saved predictions for a FINAL game (spec §33)")
+    st.add_argument("game_id", help="FINAL game whose saved predictions should be settled")
+
     v = sub.add_parser("version", help="print the model version")
     v.add_argument("--quiet", action="store_true")
 
@@ -195,9 +198,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "report":
         return _cmd_report(args)
 
-    if args.command != "predict":
-        return 2
+    if args.command == "predict":
+        return _cmd_predict(args)
+    if args.command == "settle":
+        return _cmd_settle(args)
 
+    return 2
+def _cmd_predict(args) -> int:
     try:
         db, settings = _open_db()
         repo = Repository(db)
@@ -230,6 +237,24 @@ def main(argv: list[str] | None = None) -> int:
         prediction_id = store.save(prediction)
         print(f"\nPrediction saved (id={prediction_id}); it will be settled once the game is FINAL.")
 
+    return 0
+
+
+def _cmd_settle(args) -> int:
+    try:
+        db, _ = _open_db()
+        store = SettlementStore(db)
+        settled = store.settle(args.game_id)
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    verdict = "CORRECT" if settled.correct else "WRONG"
+    print(f"Settled prediction {settled.prediction_id} for {settled.game_id}: "
+          f"prob_home={settled.prob_home:.4f}, "
+          f"final score {settled.actual_home_score}-{settled.actual_away_score}, "
+          f"brier={settled.brier:.4f}, {verdict}")
+    print(f"Aggregate over settled predictions: {store.aggregate_metrics()}")
     return 0
 
 

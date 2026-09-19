@@ -61,6 +61,7 @@ basketball_agent/
 - [x] **Phase 5** — walk-forward backtest (no random splits), §24 metrics, reliability diagram + ECE, three baselines, automated leakage/reality FAIL checks, decay-lambda sweep, synthetic league test bed
 - [x] **Phase 6** — risk agent (confidence + flags), trainable ensemble, prediction agent (reality/leakage gates), prediction settlement loop, `basketball predict` CLI, §32 acceptance checklist tests
 - [~] **Phase 7 (V1.1 real NBA data)** — all offline infrastructure DONE (raw manifests, real-CSV collector with NBA franchise map, coverage report, train-only parameter fitting, EXP-NBA-001..004, error analysis, §21 report, `ingest/coverage/experiments` CLI, full audit chain); **blocked on data**: no NBA data source reachable from this sandbox — see `DATA_REQUIREMENTS.md` (SOURCE_STATUS: UNAVAILABLE) for exactly what to provide.
+- [x] **Phase 8-A (pre-real-data hardening)** — test isolation fixed (ingest tests no longer write to the real `storage/processed/`), storage pollution removed, `bad.csv` moved out of the raw-source scan, invalid-Parquet reads fail cleanly, `basketball settle <game_id>` CLI added (§33 chain now fully command-driven), dependencies pruned to what is actually imported (pydantic, pandas), Phase 8-B command chain + player-availability data contract documented in `DATA_REQUIREMENTS.md`.
 
 ## CLI
 
@@ -72,8 +73,11 @@ $env:BASKETBALL_DB_PATH = "C:\lanqiu\storage\basketball.db"
 
 (`basketball predict ...` also works after `pip install -e .`.)  The report follows
 spec §34; `--save` persists the prediction so it can be settled against the
-final score (spec §33: Prediction → Game → Result → Evaluation → Calibration
-→ Model Improvement).
+final score with `basketball settle <game_id>` once the game is FINAL
+(spec §33: Prediction → Game → Result → Evaluation → Calibration
+→ Model Improvement).  The full real-data command chain
+(`validate → ingest → coverage → experiments/report → predict --save → settle`)
+is documented in `DATA_REQUIREMENTS.md`.
 
 ## V1 acceptance (spec §32)
 
