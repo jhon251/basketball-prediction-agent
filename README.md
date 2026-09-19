@@ -62,6 +62,7 @@ basketball_agent/
 - [x] **Phase 6** — risk agent (confidence + flags), trainable ensemble, prediction agent (reality/leakage gates), prediction settlement loop, `basketball predict` CLI, §32 acceptance checklist tests
 - [~] **Phase 7 (V1.1 real NBA data)** — all offline infrastructure DONE (raw manifests, real-CSV collector with NBA franchise map, coverage report, train-only parameter fitting, EXP-NBA-001..004, error analysis, §21 report, `ingest/coverage/experiments` CLI, full audit chain); **blocked on data**: no NBA data source reachable from this sandbox — see `DATA_REQUIREMENTS.md` (SOURCE_STATUS: UNAVAILABLE) for exactly what to provide.
 - [x] **Phase 8-A (pre-real-data hardening)** — test isolation fixed (ingest tests no longer write to the real `storage/processed/`), storage pollution removed, `bad.csv` moved out of the raw-source scan, invalid-Parquet reads fail cleanly, `basketball settle <game_id>` CLI added (§33 chain now fully command-driven), dependencies pruned to what is actually imported (pydantic, pandas), Phase 8-B command chain + player-availability data contract documented in `DATA_REQUIREMENTS.md`.
+- [x] **Phase 8-B1 (first real NBA data)** — real 2025-26 season ingested via the new stats.nba.com gamelog adapter (1,322 games, 30 teams, snapshot `90d58d1a28fd`); first real walk-forward experiments (Elo beats simulation on the 592-game test window — reported honestly), first real predict → settle → aggregate loop executed. Fitted parameters are reported only, never written over model defaults.
 
 ## CLI
 

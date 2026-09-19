@@ -88,12 +88,26 @@ def normalize_dataframe(df, *, season: str | None = None) -> dict:
 
 
 def load_nba_games_parquet(path: Path | str, *, season: str | None = None) -> dict:
-    """Read + normalize a local NBA games Parquet file (game-per-row or
-    row-per-team layouts, same as the CSV loader)."""
+    """Read + normalize a local NBA games Parquet file.
+
+    Two layouts are auto-detected:
+
+    * team-gamelog (one row per team per game, ``matchup`` column —
+      llimllib/nba_data ``gamelog_*.parquet``) -> the gamelog adapter;
+    * game-per-row / row-per-team boxscore layouts -> the standard
+      ``normalize_dataframe`` path.
+    """
+    from basketball_agent.data.collectors.nba_gamelog import (
+        load_nba_gamelog_frame, looks_like_gamelog,
+    )
+
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"parquet file not found: {path}")
-    return normalize_dataframe(read_parquet_frame(path), season=season)
+    frame = read_parquet_frame(path)
+    if looks_like_gamelog(frame):
+        return load_nba_gamelog_frame(frame, season=season)
+    return normalize_dataframe(frame, season=season)
 
 
 def load_nba_games_file(path: Path | str, *, season: str | None = None) -> dict:

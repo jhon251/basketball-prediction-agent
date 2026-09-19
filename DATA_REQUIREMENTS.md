@@ -3,13 +3,17 @@
 ## SOURCE_STATUS
 
 ```text
-SOURCE_STATUS: UNAVAILABLE
-BLOCKED_WAITING_FOR_REAL_NBA_DATA
+SOURCE_STATUS: AVAILABLE (NBA only)
+FIRST_REAL_DATA_INGESTED: 2026-09-19
 ```
 
-沙箱无外网（raw.githubusercontent.com / api.balldontlie.io / stats.nba.com /
-PyPI 全部 UNREACHABLE，nbadb 的 Kaggle 下载在用户侧同样 ConnectTimeout）。
-Market baseline（历史赔率）: **unavailable** — 不伪造。
+Phase 8-B1 已接入第一份真实数据：`llimllib/nba_data` 的 2025-26 赛季球队
+gamelog（`gamelog_2026.parquet`，1,322 场，30 队，2025-10-21 → 2026-06-13，
+含季后赛/附加赛/杯赛决赛；季前赛与全明星排除）。快照 `90d58d1a28fd`，
+SHA-256 `f992e6659dee93cff9964471e30e0d16929530360f5f135d41cfb00ee921d2bf`。
+全季 17 个赛季的 `gamelogs.parquet`（41,038 行）已下载至
+`C:\NBA_DATA\llimllib\`，因参数拟合框架当前按全量训练窗 O(历史×网格) 运行，
+多赛季回测的规模优化完成后再入库。
 
 ## 支持的输入格式（ingest 层，核心模型零改动）
 

@@ -142,9 +142,14 @@ def _parse_date(raw: Any) -> datetime:
         except ValueError:
             continue
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise IngestDataError(f"unparseable game_date: {raw!r}") from exc
+    # plain ISO strings without an offset are treated as UTC (same convention
+    # as the strptime formats above) — pydantic requires timezone-aware dates
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
 
 
 def _build_team_stats(
