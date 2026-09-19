@@ -97,8 +97,9 @@ class EnsembleAgent:
         seed: int = 7,
         warmup_games: int = 5,
         grid_step: float = 0.1,
+        train_start: datetime | None = None,
     ) -> EnsembleWeights:
-        """Train the weights on all FINAL games strictly before ``cutoff``.
+        """Train the weights on FINAL games in ``[train_start, cutoff)``.
 
         Each component's per-game probabilities come from its own
         walk-forward backtest over the training window (no look-ahead), and
@@ -108,6 +109,7 @@ class EnsembleAgent:
         train_ids = [
             g.game_id for g in repo.list_games(status=GameStatus.FINAL)
             if g.game_date < cutoff
+            and (train_start is None or g.game_date >= train_start)
         ]
         config = BacktestConfig(n_simulations=n_simulations, seed=seed, warmup_games=warmup_games)
         probs: dict[str, dict[str, float]] = {}

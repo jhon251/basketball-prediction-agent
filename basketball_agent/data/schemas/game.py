@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from basketball_agent.data.schemas.base import GameStatus, League, PlayerAvailabilityStatus
+from basketball_agent.data.schemas.base import (
+    Competition,
+    GameStatus,
+    League,
+    PlayerAvailabilityStatus,
+)
 
 
 class Game(BaseModel):
@@ -24,6 +29,7 @@ class Game(BaseModel):
     home_score: int | None = Field(default=None, ge=0)
     away_score: int | None = Field(default=None, ge=0)
     status: GameStatus
+    competition: Competition | None = None  # None = untagged (legacy rows)
 
     @model_validator(mode="after")
     def _check_structural_invariants(self) -> "Game":

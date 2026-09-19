@@ -50,26 +50,42 @@ class FittedParams:
         )
 
 
-def _train_games(repo: Repository, cutoff: datetime):
-    return sorted(
+def _train_games(
+    repo: Repository, cutoff: datetime, train_start: datetime | None = None
+):
+    """FINAL games in the TRAINING window: [train_start, cutoff).
+
+    ``train_start`` bounds the fitting window (Phase 8-B2); ``None`` keeps
+    the historical all-available behaviour.  Chronological order is kept and
+    no future information can enter: everything is strictly before cutoff.
+    """
+    games = sorted(
         (g for g in repo.list_games(status=GameStatus.FINAL) if g.game_date < cutoff),
         key=lambda g: (g.game_date, g.game_id),
     )
+    if train_start is not None:
+        games = [g for g in games if g.game_date >= train_start]
+    return games
 
 
-def estimate_home_court_advantage(repo: Repository, cutoff: datetime) -> float:
+def estimate_home_court_advantage(
+    repo: Repository, cutoff: datetime, train_start: datetime | None = None
+) -> float:
     """HCA = mean home margin over the training window (balanced schedules
     make this an unbiased estimate)."""
-    games = _train_games(repo, cutoff)
+    games = _train_games(repo, cutoff, train_start)
     if not games:
         raise ValueError("training window is empty")
     return sum(g.home_score - g.away_score for g in games) / len(games)
 
 
-def estimate_logistic_scale(repo: Repository, cutoff: datetime, hca: float) -> float:
+def estimate_logistic_scale(
+    repo: Repository, cutoff: datetime, hca: float,
+    train_start: datetime | None = None,
+) -> float:
     """Grid-search the logistic scale on the training window via walk-forward
     strength-model margins (no test data involved)."""
-    games = _train_games(repo, cutoff)
+    games = _train_games(repo, cutoff, train_start)
     if len(games) < 10:
         raise ValueError("training window too small for scale estimation")
     best_scale, best_loss = LOGISTIC_CANDIDATES[0], None
@@ -92,9 +108,12 @@ def estimate_logistic_scale(repo: Repository, cutoff: datetime, hca: float) -> f
     return best_scale
 
 
-def estimate_shrinkage_k(repo: Repository, cutoff: datetime, hca: float, scale: float) -> float:
+def estimate_shrinkage_k(
+    repo: Repository, cutoff: datetime, hca: float, scale: float,
+    train_start: datetime | None = None,
+) -> float:
     """Grid-search shrinkage k on the training window (walk-forward)."""
-    games = _train_games(repo, cutoff)
+    games = _train_games(repo, cutoff, train_start)
     if len(games) < 10:
         raise ValueError("training window too small for shrinkage estimation")
     best_k, best_loss = float(SHRINKAGE_CANDIDATES[0]), None
@@ -121,6 +140,7 @@ def fit_v1_params(
     repo: Repository,
     cutoff: datetime,
     *,
+    train_start: datetime | None = None,
     lambda_candidates: tuple[float, ...] = LAMBDA_CANDIDATES,
     n_simulations: int = 100,
     seed: int = 7,
@@ -129,21 +149,23 @@ def fit_v1_params(
     """Full train-only parameter fit (HCA -> scale -> k -> decay lambda).
 
     Every step is evaluated by walk-forward backtest restricted to the
-    training window.  The returned validation log loss is that of the final
-    frozen configuration on the training window.
+    training window ``[train_start, cutoff)`` (``train_start=None`` keeps the
+    all-available behaviour).  The returned validation log loss is that of
+    the final frozen configuration on the training window.
     """
-    games = _train_games(repo, cutoff)
+    games = _train_games(repo, cutoff, train_start)
     if len(games) < 10:
         raise ValueError("training window too small to fit parameters")
 
-    hca = estimate_home_court_advantage(repo, cutoff)
-    scale = estimate_logistic_scale(repo, cutoff, hca)
-    k = estimate_shrinkage_k(repo, cutoff, hca, scale)
+    hca = estimate_home_court_advantage(repo, cutoff, train_start)
+    scale = estimate_logistic_scale(repo, cutoff, hca, train_start)
+    k = estimate_shrinkage_k(repo, cutoff, hca, scale, train_start)
 
     # decay lambda: sweep on the training window only
     sweep = sweep_decay_lambda(
         repo, list(lambda_candidates),
         n_simulations=n_simulations, warmup_games=warmup_games, seed=seed,
+        game_ids=[g.game_id for g in games],
     )
     best_lambda, best_sweep = min(
         sweep.items(), key=lambda kv: kv[1]["log_loss"] or float("inf")

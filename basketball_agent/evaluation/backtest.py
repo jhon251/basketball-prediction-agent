@@ -140,6 +140,7 @@ class BacktestConfig:
     warmup_games: int = 5
     window_days: float | None = None  # None = expanding window
     decay_lambda: float = 0.0
+    include_non_regular_history: bool = False  # Phase 8-B2: playoff/cup history is opt-in
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ class BacktestEngine:
             repo,
             decay_lambda=self._config.decay_lambda,
             window_days=self._config.window_days,
+            include_non_regular_history=self._config.include_non_regular_history,
         )
 
     def run(self, game_ids: list[str] | None = None) -> "BacktestResult":
@@ -316,13 +318,15 @@ def sweep_decay_lambda(
     n_simulations: int = 500,
     warmup_games: int = 5,
     seed: int = 7,
+    game_ids: list[str] | None = None,
 ) -> dict[float, dict]:
     """Grid-search the time-decay lambda by walk-forward backtest.
 
     Spec §10: lambda must be determined by historical backtesting, not by
     intuition.  Each lambda is evaluated with the exact same chronological
-    protocol; the caller picks the best value from the returned summaries
-    (and should prefer out-of-sample stability over tiny gains).
+    protocol over ``game_ids`` (all FINAL games when None); the caller picks
+    the best value from the returned summaries (and should prefer
+    out-of-sample stability over tiny gains).
     """
     outcomes: dict[float, dict] = {}
     for lam in lambdas:
@@ -336,5 +340,5 @@ def sweep_decay_lambda(
                 decay_lambda=lam,
             ),
         )
-        outcomes[lam] = engine.run().summary()
+        outcomes[lam] = engine.run(game_ids=game_ids).summary()
     return outcomes

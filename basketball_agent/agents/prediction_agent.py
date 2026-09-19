@@ -73,6 +73,7 @@ class PredictionAgent:
         ensemble_weights: EnsembleWeights | None = None,
         snapshot_id: str | None = None,
         model_version: str = __version__,
+        include_non_regular_history: bool = False,
     ) -> None:
         self._repo = repo
         self._n_simulations = n_simulations
@@ -84,7 +85,11 @@ class PredictionAgent:
         self._risk = RiskAgent()
         self._snapshot_id = snapshot_id
         self._model_version = model_version
-        self._pipeline = FeaturePipeline(repo, decay_lambda=decay_lambda)
+        self._pipeline = FeaturePipeline(
+            repo,
+            decay_lambda=decay_lambda,
+            include_non_regular_history=include_non_regular_history,
+        )
 
     def predict(self, game_id: str, as_of: datetime | None = None) -> GamePrediction:
         as_of = as_of or datetime.now(timezone.utc)

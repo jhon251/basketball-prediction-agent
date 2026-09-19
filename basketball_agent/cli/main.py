@@ -142,11 +142,27 @@ def _build_parser() -> argparse.ArgumentParser:
     exp = sub.add_parser("experiments", help="run EXP-NBA-001..004 (strict train/test split)")
     exp.add_argument("--train-cutoff", required=True,
                      help="train window end (ISO, UTC) — parameters fit only before this")
+    exp.add_argument("--train-start", default=None,
+                     help="train window start (ISO, UTC); default: all available history")
+    exp.add_argument("--train-seasons", type=int, default=None, choices=[1, 3, 5],
+                     help="shorthand for --train-start: bound fitting to the last N NBA "
+                          "seasons before the cutoff (1/3/5); default: all available")
     exp.add_argument("--test-start", required=True, help="test window start (ISO, UTC)")
     exp.add_argument("--test-end", default=None, help="test window end (ISO, UTC)")
     exp.add_argument("--n-simulations", type=int, default=300)
     exp.add_argument("--seed", type=int, default=7)
     exp.add_argument("--warmup", type=int, default=5)
+
+    wb = sub.add_parser("window-backtest",
+                        help="multi-season walk-forward backtest over a REGULAR_SEASON window")
+    wb.add_argument("--window-start", required=True, help="evaluation window start (ISO, UTC)")
+    wb.add_argument("--window-end", default=None, help="evaluation window end (ISO, UTC)")
+    wb.add_argument("--train-seasons", type=int, default=1,
+                    help="fit window before the evaluation window, in NBA seasons "
+                         "(1/3/5; 0 skips fitting)")
+    wb.add_argument("--n-simulations", type=int, default=100)
+    wb.add_argument("--seed", type=int, default=7)
+    wb.add_argument("--warmup", type=int, default=5)
 
     rep = sub.add_parser("report", help="render the Phase 7 Final Report (spec §21)")
     rep.add_argument("--train-cutoff", required=True)
@@ -195,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_data_status(args)
     if args.command == "experiments":
         return _cmd_experiments(args)
+    if args.command == "window-backtest":
+        return _cmd_window_backtest(args)
     if args.command == "report":
         return _cmd_report(args)
 
@@ -398,7 +416,7 @@ def _cmd_coverage(args) -> int:
 
 
 def _cmd_experiments(args) -> int:
-    from basketball_agent.evaluation.experiments import run_phase7_experiments
+    from basketball_agent.evaluation.experiments import resolve_train_start, run_phase7_experiments
     from basketball_agent.evaluation.param_tuning import format_param_report
 
     try:
@@ -410,9 +428,16 @@ def _cmd_experiments(args) -> int:
             print("FAIL: --train-cutoff and --test-start must be valid ISO timestamps",
                   file=sys.stderr)
             return 1
+        if args.train_start and args.train_seasons:
+            print("FAIL: use either --train-start or --train-seasons, not both",
+                  file=sys.stderr)
+            return 1
+        train_start = (_parse_as_of(args.train_start) if args.train_start
+                       else resolve_train_start(train_cutoff, args.train_seasons))
         results = run_phase7_experiments(
             Repository(db), train_cutoff, test_start, test_end,
             n_simulations=args.n_simulations, seed=args.seed, warmup_games=args.warmup,
+            train_start=train_start,
         )
     except Exception as exc:  # noqa: BLE001 — CLI boundary
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -436,6 +461,50 @@ def _cmd_experiments(args) -> int:
                 print(f"  {name:10s} acc={metrics['accuracy']:.3f} "
                       f"logloss={metrics['log_loss']:.4f} brier={metrics['brier_score']:.4f}")
     return 0
+
+
+def _cmd_window_backtest(args) -> int:
+    from basketball_agent.evaluation.experiments import run_window_backtest
+
+    try:
+        db, _ = _open_db()
+        window_start = _parse_as_of(args.window_start)
+        window_end = _parse_as_of(args.window_end) if args.window_end else None
+        if window_start is None:
+            print("FAIL: --window-start must be a valid ISO timestamp", file=sys.stderr)
+            return 1
+        result = run_window_backtest(
+            Repository(db), window_start, window_end,
+            train_seasons=(args.train_seasons or None),
+            n_simulations=args.n_simulations, seed=args.seed, warmup_games=args.warmup,
+        )
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"WINDOW BACKTEST {result['window_start'][:10]} .. "
+          f"{str(result['window_end'])[:10]}  "
+          f"(games: {result['n_window_games']}, train_seasons: {result['train_seasons']})")
+    if result["fitted_params"] is not None:
+        fp = result["fitted_params"]
+        print(f"fitted (train-window only, NOT applied to model defaults): "
+              f"HCA={fp.home_court_advantage:.2f} scale={fp.margin_logistic_scale:.2f} "
+              f"k={fp.shrinkage_k:.1f} lambda={fp.decay_lambda:.3f} "
+              f"val_logloss={fp.validation_logloss:.4f}")
+    print()
+    header = (f"{'model':<12}{'n':>6}{'acc':>8}{'logloss':>9}{'brier':>8}{'ece':>8}"
+              f"{'margin_mae':>12}{'total_mae':>11}")
+    print(header)
+    for name, metrics in result["models"].items():
+        print(f"{name:<12}{metrics['n_win_prob']:>6}"
+              f"{_fmt(metrics['accuracy']):>8}{_fmt(metrics['log_loss']):>9}"
+              f"{_fmt(metrics['brier_score']):>8}{_fmt(metrics['ece']):>8}"
+              f"{_fmt(metrics['margin_mae']):>12}{_fmt(metrics['total_mae']):>11}")
+    return 0
+
+
+def _fmt(value):
+    return f"{value:.4f}" if value is not None else "n/a"
 
 
 def _cmd_report(args) -> int:

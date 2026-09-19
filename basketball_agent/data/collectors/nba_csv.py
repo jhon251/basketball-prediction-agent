@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from basketball_agent.data.collectors.nba_teams import canonical_team_id
-from basketball_agent.data.schemas.base import GameStatus, League
+from basketball_agent.data.schemas.base import Competition, GameStatus, League
 from basketball_agent.data.schemas.game import Game, TeamGameStats
 
 UTC = timezone.utc
@@ -262,6 +262,11 @@ def _parse_game_per_row(raw_rows: list[dict], columns: dict[str, str], season: s
             if "game_id" in columns and str(row[columns["game_id"]]).strip()
             else f"{date:%Y%m%d}_{home_id}_{away_id}"
         )
+        competition = None
+        if "competition" in columns:
+            raw_competition = str(row[columns["competition"]]).strip()
+            if raw_competition:
+                competition = Competition(raw_competition)  # raises on unknown value
         teams.update((home_id, away_id))
 
         home_ts = _build_team_stats(game_id, home_id, True, row, columns, "home", estimated)
@@ -272,6 +277,7 @@ def _parse_game_per_row(raw_rows: list[dict], columns: dict[str, str], season: s
             game_id=game_id, league=League.NBA, season=season_value, game_date=date,
             home_team_id=home_id, away_team_id=away_id,
             home_score=home_score, away_score=away_score, status=GameStatus.FINAL,
+            competition=competition,
         ))
         team_stats.extend([home_ts, away_ts])
 

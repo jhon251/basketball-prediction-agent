@@ -5,14 +5,22 @@ Design rules:
 * every read used for modeling must go through an ``as_of`` timestamp filter
   (structural leakage guard);
 * writes accept schema-validated models only.
+
+Reads are served from a per-``Database`` immutable-data cache (Phase 8-B2):
+games and team-stat rows never change after ingestion, so they are loaded
+once per Database instance and every ``as_of`` read is a slice/filter over
+the cached, already-sorted lists.  This is a pure performance change — the
+returned objects, values and ordering are identical to the SQL queries.
+Any write through the same Database invalidates the cache.
 """
 from __future__ import annotations
 
+import bisect
 import sqlite3
 from datetime import datetime, timezone
 
 from basketball_agent.data.db.connection import Database
-from basketball_agent.data.schemas.base import GameStatus, League
+from basketball_agent.data.schemas.base import Competition, GameStatus, League
 from basketball_agent.data.schemas.dataset import Dataset
 from basketball_agent.data.schemas.game import (
     Game,
@@ -24,6 +32,22 @@ from basketball_agent.data.schemas.player import Player
 from basketball_agent.data.schemas.team import Team
 
 
+class _ReadOnlyCache:
+    """Immutable-row cache shared by all Repository instances of one Database."""
+
+    def __init__(self) -> None:
+        self.games: list[Game] | None = None            # sorted (game_date, game_id)
+        self.games_by_id: dict[str, Game] | None = None
+        self.team_stats: list[TeamGameStats] | None = None  # sorted (game_id, team_id)
+        self.stats_dates: list[datetime] | None = None      # parallel to team_stats
+
+    def invalidate(self) -> None:
+        self.games = None
+        self.games_by_id = None
+        self.team_stats = None
+        self.stats_dates = None
+
+
 def _parse_dt(raw: str | None) -> datetime | None:
     if raw is None:
         return None
@@ -31,6 +55,7 @@ def _parse_dt(raw: str | None) -> datetime | None:
 
 
 def _game_from_row(row: sqlite3.Row) -> Game:
+    keys = row.keys()
     return Game(
         game_id=row["game_id"],
         league=League(row["league"]),
@@ -41,6 +66,8 @@ def _game_from_row(row: sqlite3.Row) -> Game:
         home_score=row["home_score"],
         away_score=row["away_score"],
         status=GameStatus(row["status"]),
+        competition=(Competition(row["competition"])
+                     if "competition" in keys and row["competition"] else None),
     )
 
 
@@ -109,31 +136,67 @@ class Repository:
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        if not hasattr(db, "_read_cache"):
+            db._read_cache = _ReadOnlyCache()
+        self._cache: _ReadOnlyCache = db._read_cache
+
+    def _invalidate(self) -> None:
+        self._cache.invalidate()
+
+    def _cached_games(self) -> list[Game]:
+        if self._cache.games is None:
+            with self._db.session() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM games ORDER BY game_date ASC, game_id ASC"
+                ).fetchall()
+            self._cache.games = [_game_from_row(r) for r in rows]
+            self._cache.games_by_id = {g.game_id: g for g in self._cache.games}
+        return self._cache.games
+
+    def _cached_team_stats(self) -> list[TeamGameStats]:
+        if self._cache.team_stats is None:
+            with self._db.session() as conn:
+                rows = conn.execute(
+                    "SELECT ts.* FROM team_game_stats ts "
+                    "ORDER BY ts.game_id ASC, ts.team_id ASC"
+                ).fetchall()
+            self._cache.team_stats = [_team_stats_from_row(r) for r in rows]
+            dates = {
+                g.game_id: g.game_date for g in self._cached_games()
+            }
+            self._cache.stats_dates = [dates.get(ts.game_id) for ts in self._cache.team_stats]
+        return self._cache.team_stats
 
     # ------------------------------------------------------------------ writes
 
     def upsert_team(self, team: Team) -> None:
+        self._invalidate()
         with self._db.transaction() as conn:
             self._upsert_team(conn, team)
 
     def upsert_player(self, player: Player) -> None:
+        self._invalidate()
         with self._db.transaction() as conn:
             self._upsert_player(conn, player)
 
     def insert_game(self, game: Game, inserted_at: datetime | None = None) -> None:
+        self._invalidate()
         inserted_at = inserted_at or datetime.now(timezone.utc)
         with self._db.transaction() as conn:
             self._insert_game(conn, game, inserted_at)
 
     def insert_team_stats(self, ts: TeamGameStats) -> None:
+        self._invalidate()
         with self._db.transaction() as conn:
             self._insert_team_stats(conn, ts)
 
     def insert_player_stats(self, ps: PlayerGameStats) -> None:
+        self._invalidate()
         with self._db.transaction() as conn:
             self._insert_player_stats(conn, ps)
 
     def insert_availability(self, a: PlayerAvailability) -> None:
+        self._invalidate()
         with self._db.transaction() as conn:
             self._insert_availability(conn, a)
 
@@ -142,6 +205,7 @@ class Repository:
 
         Returns the number of rows written.  Any failure rolls back every row.
         """
+        self._invalidate()
         inserted_at = inserted_at or datetime.now(timezone.utc)
         count = 0
         with self._db.transaction() as conn:
@@ -184,10 +248,13 @@ class Repository:
     def _insert_game(self, conn: sqlite3.Connection, game: Game, inserted_at: datetime) -> None:
         conn.execute(
             "INSERT INTO games (game_id, league, season, game_date, home_team_id, away_team_id, "
-            "home_score, away_score, status, inserted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "home_score, away_score, status, competition, inserted_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (game.game_id, game.league.value, game.season, game.game_date.isoformat(),
              game.home_team_id, game.away_team_id, game.home_score, game.away_score,
-             game.status.value, inserted_at.isoformat()),
+             game.status.value,
+             game.competition.value if game.competition else None,
+             inserted_at.isoformat()),
         )
 
     def _insert_team_stats(self, conn: sqlite3.Connection, ts: TeamGameStats) -> None:
@@ -231,9 +298,8 @@ class Repository:
         return _player_from_row(row) if row else None
 
     def get_game(self, game_id: str) -> Game | None:
-        with self._db.session() as conn:
-            row = conn.execute("SELECT * FROM games WHERE game_id = ?", (game_id,)).fetchone()
-        return _game_from_row(row) if row else None
+        self._cached_games()
+        return self._cache.games_by_id.get(game_id)
 
     def list_games(
         self,
@@ -241,23 +307,33 @@ class Repository:
         as_of: datetime | None = None,
         league: League | None = None,
         status: GameStatus | None = None,
+        competition: Competition | None = None,
+        exclude_competitions: tuple[Competition, ...] | None = None,
     ) -> list[Game]:
-        """List games; ``as_of`` excludes any game dated after the timestamp."""
-        sql = "SELECT * FROM games WHERE 1=1"
-        params: list = []
-        if as_of is not None:
-            sql += " AND game_date <= ?"
-            params.append(as_of.isoformat())
-        if league is not None:
-            sql += " AND league = ?"
-            params.append(league.value)
-        if status is not None:
-            sql += " AND status = ?"
-            params.append(status.value)
-        sql += " ORDER BY game_date ASC, game_id ASC"
-        with self._db.session() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [_game_from_row(r) for r in rows]
+        """List games; ``as_of`` excludes any game dated after the timestamp.
+
+        ``competition`` / ``exclude_competitions`` filter the within-league
+        segment; untagged legacy rows (competition IS NULL) are only returned
+        when ``competition`` is not used as a positive filter.
+        """
+        excluded = {c.value for c in exclude_competitions} if exclude_competitions else None
+        out = []
+        for g in self._cached_games():
+            if as_of is not None and g.game_date > as_of:
+                continue
+            if league is not None and g.league is not league:
+                continue
+            if status is not None and g.status is not status:
+                continue
+            if competition is not None and (
+                g.competition is None or g.competition is not competition
+            ):
+                continue
+            if excluded is not None and g.competition is not None \
+                    and g.competition.value in excluded:
+                continue
+            out.append(g)
+        return out
 
     def list_team_stats(
         self,
@@ -266,21 +342,18 @@ class Repository:
         team_id: str | None = None,
         as_of: datetime | None = None,
     ) -> list[TeamGameStats]:
-        sql = "SELECT * FROM team_game_stats WHERE 1=1"
-        params: list = []
-        if game_id is not None:
-            sql += " AND game_id = ?"
-            params.append(game_id)
-        if team_id is not None:
-            sql += " AND team_id = ?"
-            params.append(team_id)
-        if as_of is not None:
-            sql += " AND game_id IN (SELECT game_id FROM games WHERE game_date <= ?)"
-            params.append(as_of.isoformat())
-        sql += " ORDER BY game_id ASC, team_id ASC"
-        with self._db.session() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [_team_stats_from_row(r) for r in rows]
+        out = []
+        for i, ts in enumerate(self._cached_team_stats()):
+            if game_id is not None and ts.game_id != game_id:
+                continue
+            if team_id is not None and ts.team_id != team_id:
+                continue
+            if as_of is not None:
+                d = self._cache.stats_dates[i]
+                if d is None or d > as_of:
+                    continue
+            out.append(ts)
+        return out
 
     def list_player_stats(
         self,

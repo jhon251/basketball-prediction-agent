@@ -4,14 +4,20 @@ Strict protocol: parameters/weights are only ever fit on the TRAIN window;
 the TEST window is used for evaluation only.  Every experiment returns its
 metrics and an honest comparison — no preset conclusion that the simulation
 or the ensemble must win (spec §18).
+
+Phase 8-B2 additions: the training window can be bounded (``train_start`` /
+``train_seasons``) so multi-season fitting stays feasible, and
+:func:`run_window_backtest` evaluates the frozen-default predictors over an
+explicit multi-season window.  Chronological order and leakage rules are
+untouched; no model formula or default parameter changes here.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from basketball_agent.agents.ensemble_agent import EnsembleAgent
 from basketball_agent.data.db.repository import Repository
-from basketball_agent.data.schemas.base import GameStatus
+from basketball_agent.data.schemas.base import Competition, GameStatus
 from basketball_agent.evaluation.backtest import (
     BacktestConfig,
     BacktestEngine,
@@ -20,11 +26,32 @@ from basketball_agent.evaluation.backtest import (
     SimulationPredictor,
     StrengthPredictor,
 )
-from basketball_agent.evaluation.metrics import log_loss
+from basketball_agent.evaluation.calibration import build_reliability_table
+from basketball_agent.evaluation.metrics import log_loss, mae
 from basketball_agent.evaluation.param_tuning import FittedParams, fit_v1_params
 from basketball_agent.models.pace_model import PaceConfig
 from basketball_agent.models.score_model import ScoreModelConfig
 from basketball_agent.models.win_probability import WinProbabilityConfig
+
+
+def nba_season_start_year(moment: datetime) -> int:
+    """Season-start year under the NBA calendar (seasons begin in October)."""
+    return moment.year if moment.month >= 10 else moment.year - 1
+
+
+def resolve_train_start(cutoff: datetime, train_seasons: int | None) -> datetime | None:
+    """Bounded training window start for ``train_seasons`` NBA seasons.
+
+    ``None`` (all available history) returns ``None``.  Season boundaries are
+    October 1 of the NBA season-start year — a pure windowing convention, no
+    game data is involved.
+    """
+    if train_seasons is None:
+        return None
+    if train_seasons < 1:
+        raise ValueError("train_seasons must be >= 1")
+    start_year = nba_season_start_year(cutoff) - (train_seasons - 1)
+    return datetime(start_year, 10, 1, tzinfo=timezone.utc)
 
 
 def _test_game_ids(repo: Repository, test_start: datetime, test_end: datetime | None) -> list[str]:
@@ -75,13 +102,20 @@ def exp_nba_002_decay_lambda_sweep(
     n_simulations: int = 100,
     seed: int = 7,
     warmup_games: int = 5,
+    train_start: datetime | None = None,
 ) -> dict:
     """Decay-lambda sweep on the TRAIN window only."""
     from basketball_agent.evaluation.backtest import sweep_decay_lambda
 
+    train_games = sorted(
+        (g for g in repo.list_games(status=GameStatus.FINAL)
+         if (train_start is None or g.game_date >= train_start) and g.game_date < train_cutoff),
+        key=lambda g: (g.game_date, g.game_id),
+    )
     sweep = sweep_decay_lambda(
         repo, list(candidates),
         n_simulations=n_simulations, warmup_games=warmup_games, seed=seed,
+        game_ids=[g.game_id for g in train_games],
     )
     best = min(sweep.items(), key=lambda kv: kv[1]["log_loss"] or float("inf"))
     return {
@@ -104,6 +138,7 @@ def exp_nba_003_ensemble_vs_individual(
     fit_n_simulations: int = 150,
     seed: int = 7,
     warmup_games: int = 5,
+    train_start: datetime | None = None,
 ) -> dict:
     """Fit the ensemble on TRAIN only; compare it against every single
     component on TEST.  Weights never see the test window."""
@@ -111,6 +146,7 @@ def exp_nba_003_ensemble_vs_individual(
     weights = agent.fit(
         repo, train_cutoff, n_simulations=fit_n_simulations,
         seed=seed, warmup_games=warmup_games,
+        train_start=train_start,
     )
     ids = _test_game_ids(repo, test_start, test_end)
     config = BacktestConfig(n_simulations=n_simulations, seed=seed, warmup_games=warmup_games)
@@ -215,14 +251,17 @@ def run_phase7_experiments(
     n_simulations: int = 500,
     seed: int = 7,
     warmup_games: int = 5,
+    train_start: datetime | None = None,
 ) -> dict:
     """EXP-NBA-001..004 with strict train/test isolation.
 
     Returns a dict keyed by experiment id.  Parameters are fitted on the
-    train window and FROZEN for all test-window evaluations.
+    train window ``[train_start, train_cutoff)`` and FROZEN for all
+    test-window evaluations.
     """
     fitted = fit_v1_params(
-        repo, train_cutoff, n_simulations=min(n_simulations, 150), seed=seed,
+        repo, train_cutoff, train_start=train_start,
+        n_simulations=min(n_simulations, 150), seed=seed,
         warmup_games=warmup_games,
     )
     return {
@@ -233,14 +272,86 @@ def run_phase7_experiments(
         ),
         "EXP-NBA-002": exp_nba_002_decay_lambda_sweep(
             repo, train_cutoff, n_simulations=min(n_simulations, 150),
-            seed=seed, warmup_games=warmup_games,
+            seed=seed, warmup_games=warmup_games, train_start=train_start,
         ),
         "EXP-NBA-003": exp_nba_003_ensemble_vs_individual(
             repo, train_cutoff, test_start, test_end, n_simulations=n_simulations,
             fit_n_simulations=min(n_simulations, 150), seed=seed, warmup_games=warmup_games,
+            train_start=train_start,
         ),
         "EXP-NBA-004": exp_nba_004_simulation_vs_baselines(
             repo, test_start, test_end, fitted=fitted, n_simulations=n_simulations,
             seed=seed, warmup_games=warmup_games,
         ),
+    }
+
+
+def run_window_backtest(
+    repo: Repository,
+    window_start: datetime,
+    window_end: datetime | None,
+    *,
+    train_seasons: int | None = 1,
+    n_simulations: int = 100,
+    seed: int = 7,
+    warmup_games: int = 5,
+) -> dict:
+    """Multi-season walk-forward backtest over one evaluation window.
+
+    Phase 8-B2: evaluates the frozen-default predictors (random / elo /
+    strength / simulation) on every REGULAR_SEASON FINAL game in
+    ``[window_start, window_end)``; features are computed as-of each game's
+    own tip-off over its full prior history (regular season only by default
+    — the BacktestConfig handles that).  Fitting, when requested via
+    ``train_seasons``, happens only on the window immediately BEFORE
+    ``window_start`` and is reported separately — never used to change model
+    defaults.
+    """
+    games = [
+        g for g in repo.list_games(status=GameStatus.FINAL,
+                                   competition=Competition.REGULAR_SEASON)
+        if g.game_date >= window_start and (window_end is None or g.game_date < window_end)
+    ]
+    games.sort(key=lambda g: (g.game_date, g.game_id))
+    ids = [g.game_id for g in games]
+
+    config = BacktestConfig(
+        n_simulations=n_simulations, seed=seed, warmup_games=warmup_games,
+    )
+    predictors = {
+        "random": RandomPredictor(),
+        "elo": EloPredictor(),
+        "strength": StrengthPredictor(),
+        "simulation": SimulationPredictor(n_simulations=n_simulations, seed=seed),
+    }
+    results: dict[str, dict] = {}
+    for name, predictor in predictors.items():
+        result = BacktestEngine(repo, predictor, config).run(game_ids=ids)
+        metrics = result.summary()
+        sim_recs = [r for r in result.records
+                    if r.prediction is not None and r.actual_home_win is not None]
+        metrics["reliability"] = [
+            {"bin_low": b.bin_low, "bin_high": b.bin_high, "count": b.count,
+             "mean_predicted": b.mean_predicted, "actual_rate": b.actual_rate}
+            for b in build_reliability_table(
+                [r.prediction.prob_home for r in sim_recs],
+                [r.actual_home_win for r in sim_recs])
+        ]
+        results[name] = metrics
+
+    fitted: FittedParams | None = None
+    if train_seasons is not None:
+        train_start = resolve_train_start(window_start, train_seasons)
+        fitted = fit_v1_params(
+            repo, window_start, train_start=train_start,
+            n_simulations=min(n_simulations, 150), seed=seed, warmup_games=warmup_games,
+        )
+
+    return {
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat() if window_end else "end of data",
+        "n_window_games": len(ids),
+        "train_seasons": train_seasons,
+        "fitted_params": fitted,
+        "models": results,
     }

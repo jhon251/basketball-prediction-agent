@@ -55,13 +55,28 @@ def aggregate_team(
 
     Returns a dict with ``games_played``, ``last_game_date`` and one
     decay-weighted mean per field in ``AGGREGATED_FIELDS``.
+
+    Single pass over the rows: per field, values and weights are accumulated
+    in the exact same row order (and with the same ``v * w`` terms) that
+    :func:`weighted_mean` would use, so results are bit-identical — this is
+    a performance-only form (Phase 8-B2) for long histories.
     """
     ordered = sorted(rows, key=lambda r: r.game_date)
     weights = decay_weights([r.game_date for r in ordered], as_of, decay_lambda)
+    sums = {f: 0.0 for f in AGGREGATED_FIELDS}
+    weight_sums = {f: 0.0 for f in AGGREGATED_FIELDS}
+    for row, w in zip(ordered, weights):
+        if w <= 0:
+            continue
+        for f in AGGREGATED_FIELDS:
+            v = getattr(row, f)
+            if v is not None:
+                sums[f] += v * w
+                weight_sums[f] += w
     out: dict = {
         "games_played": len(ordered),
         "last_game_date": ordered[-1].game_date if ordered else None,
     }
-    for field in AGGREGATED_FIELDS:
-        out[field] = weighted_mean([getattr(r, field) for r in ordered], weights)
+    for f in AGGREGATED_FIELDS:
+        out[f] = sums[f] / weight_sums[f] if weight_sums[f] > 0 else None
     return out

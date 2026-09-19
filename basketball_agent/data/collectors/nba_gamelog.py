@@ -39,6 +39,13 @@ CANONICAL_STAT_COLUMNS = (
     "possessions", "fg", "fga", "fg3", "fg3a", "ft", "fta",
     "orb", "drb", "trb", "ast", "tov", "stl", "blk", "pf",
 )
+# stats.nba.com game_id prefix -> competition segment; anything else -> OTHER
+_PREFIX_TO_COMPETITION = {
+    "002": "REGULAR_SEASON",
+    "004": "PLAYOFF",
+    "005": "PLAY_IN",
+    "006": "CUP",
+}
 
 
 def looks_like_gamelog(df: Any) -> bool:
@@ -115,6 +122,7 @@ def load_nba_gamelog_frame(df: Any, *, season: str | None = None) -> dict:
             "away_team": away["team_id"],
             "home_score": int(home["pts"]),
             "away_score": int(away["pts"]),
+            "competition": _PREFIX_TO_COMPETITION.get(str(game_id)[:3], "OTHER"),
         }
         for side, row in (("home", home), ("away", away)):
             for source_col, canonical in STAT_MAP.items():
@@ -125,7 +133,8 @@ def load_nba_gamelog_frame(df: Any, *, season: str | None = None) -> dict:
         records.append(record)
 
     columns = {name: name for name in (
-        ["game_id", "game_date", "season", "home_team", "away_team", "home_score", "away_score"]
+        ["game_id", "game_date", "season", "home_team", "away_team", "home_score",
+         "away_score", "competition"]
         + [f"home_{s}" for s in CANONICAL_STAT_COLUMNS]
         + [f"away_{s}" for s in CANONICAL_STAT_COLUMNS]
     )}

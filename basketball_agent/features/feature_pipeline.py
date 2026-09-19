@@ -31,6 +31,23 @@ from basketball_agent.features.team.boxscore import TeamGameDerived, derive
 from basketball_agent.features.team.form import last_n_stats
 from basketball_agent.models.elo import EloConfig, compute_ratings, expected_score
 
+# Module-level memo for derive(): it is a pure function of the immutable,
+# validated stat rows (frozen pydantic models, hashable by value), so the
+# cache key is the row pair itself — safe across databases and pipelines and
+# bit-identical to recomputing (Phase 8-B2 performance cache).
+_DERIVED_PAIR_CACHE: dict[tuple, tuple] = {}
+
+
+def _derive_pair(home, away, game_date):
+    """Both sides of one game through derive(), memoized by its inputs."""
+    key = (home, away, game_date)
+    cached = _DERIVED_PAIR_CACHE.get(key)
+    if cached is None:
+        cached = (derive(home.game_id, game_date, home, away),
+                  derive(home.game_id, game_date, away, home))
+        _DERIVED_PAIR_CACHE[key] = cached
+    return cached
+
 
 class FeaturePipeline:
     """Computes :class:`GameFeatures` for one game at one timestamp.
@@ -46,6 +63,7 @@ class FeaturePipeline:
         decay_lambda: float = 0.0,
         elo_config: EloConfig | None = None,
         window_days: float | None = None,
+        include_non_regular_history: bool = False,
     ) -> None:
         if decay_lambda < 0:
             raise ValueError("decay_lambda must be >= 0")
@@ -55,6 +73,10 @@ class FeaturePipeline:
         self._decay_lambda = decay_lambda
         self._elo_config = elo_config or EloConfig()
         self._window_days = window_days
+        # Phase 8-B2: default history excludes non-regular competition segments
+        # (play-in / playoff / cup).  Untagged legacy rows stay eligible so
+        # existing datasets keep working; other segments are an explicit opt-in.
+        self._include_non_regular_history = include_non_regular_history
 
     # ------------------------------------------------------------------ public
 
@@ -153,6 +175,13 @@ class FeaturePipeline:
             g for g in self._repo.list_games(as_of=as_of, status=GameStatus.FINAL)
             if g.game_date < as_of and g.game_id != game_id
         ]
+        if not self._include_non_regular_history:
+            from basketball_agent.data.schemas.base import NON_REGULAR_COMPETITIONS
+
+            history = [
+                g for g in history
+                if g.competition is None or g.competition not in NON_REGULAR_COMPETITIONS
+            ]
         if self._window_days is not None:
             window_start = as_of - timedelta(days=self._window_days)
             history = [g for g in history if g.game_date >= window_start]
@@ -179,8 +208,7 @@ class FeaturePipeline:
                 away = next(r for r in rows if r.team_id == game.away_team_id)
             except StopIteration:
                 continue
-            d_home = derive(gid, game.game_date, home, away)
-            d_away = derive(gid, game.game_date, away, home)
+            d_home, d_away = _derive_pair(home, away, game.game_date)
             derived[home.team_id].append(d_home)
             derived[away.team_id].append(d_away)
         return dict(derived)

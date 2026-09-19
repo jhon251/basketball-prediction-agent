@@ -133,10 +133,12 @@ def merge_raw_datasets(raws: list[dict]) -> dict:
         "player_stats": [], "availability": [],
     }
     estimated = 0
+    neutral_site_games = 0
     for raw in raws:
         for key in merged:
             merged[key].extend(raw.get(key, []))
         estimated += raw.get("_meta", {}).get("possessions_estimated_for", 0)
+        neutral_site_games += raw.get("_meta", {}).get("neutral_site_games", 0)
     seen_teams: set[str] = set()
     deduped: list[dict] = []
     for team in merged["teams"]:
@@ -144,5 +146,9 @@ def merge_raw_datasets(raws: list[dict]) -> dict:
             seen_teams.add(team["team_id"])
             deduped.append(team)
     merged["teams"] = deduped
-    merged["_meta"] = {"n_games": len(merged["games"]), "possessions_estimated_for": estimated}
+    merged["_meta"] = {
+        "n_games": len(merged["games"]),
+        "possessions_estimated_for": estimated,
+        "neutral_site_games": neutral_site_games,
+    }
     return merged

@@ -13,7 +13,15 @@ from pathlib import Path
 from typing import Iterator
 
 SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "schema.sql"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# NBA game_id prefix -> competition (stats.nba.com convention, Phase 8-B2).
+_GAME_ID_PREFIX_COMPETITION = {
+    "002": "REGULAR_SEASON",
+    "004": "PLAYOFF",
+    "005": "PLAY_IN",
+    "006": "CUP",
+}
 
 
 class Database:
@@ -35,11 +43,12 @@ class Database:
         return conn
 
     def initialize(self) -> None:
-        """Create the schema (idempotent) and stamp the schema version."""
+        """Create the schema (idempotent), migrate older files, stamp version."""
         ddl = self.schema_sql_path.read_text(encoding="utf-8")
         conn = self.connect()
         try:
             conn.executescript(ddl)
+            self._migrate(conn)
             conn.execute(
                 "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
                 (SCHEMA_VERSION, datetime.now(timezone.utc).isoformat()),
@@ -47,6 +56,22 @@ class Database:
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Idempotent in-place migrations.  Never deletes rows: legacy games
+        without a recognizable prefix keep competition NULL (untagged)."""
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
+        if "competition" not in columns:
+            conn.execute("ALTER TABLE games ADD COLUMN competition TEXT")
+        # backfill untagged NBA games from the game_id prefix; unknown prefixes
+        # stay NULL — no silent guessing
+        for prefix, competition in _GAME_ID_PREFIX_COMPETITION.items():
+            conn.execute(
+                "UPDATE games SET competition = ? WHERE competition IS NULL "
+                "AND league = 'NBA' AND substr(game_id, 1, 3) = ?",
+                (competition, prefix),
+            )
 
     @contextmanager
     def session(self) -> Iterator[sqlite3.Connection]:

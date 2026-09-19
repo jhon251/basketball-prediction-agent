@@ -122,3 +122,37 @@ class TestGamelogAdapter:
 
         result = load_nba_games_file(path)
         assert result["_meta"]["n_games"] == 1
+
+    def test_competition_tagged_from_prefix(self):
+        rows = [
+            _row(),  # 002 -> REGULAR_SEASON
+            _row(team_abbreviation="BOS", matchup="BOS @ LAL", pts=105,
+                 fgm=38, fga=88, fg3m=13, fg3a=36, ftm=16, fta=20,
+                 oreb=10, dreb=30, reb=40, ast=22, tov=14, stl=7, blk=4, pf=21, poss=102),
+            # 004 -> PLAYOFF
+            _row(game_id="0042500405", season_year="2025-26",
+                 game_date="2026-06-13T00:00:00", team_abbreviation="SAS",
+                 matchup="SAS vs. NYK", pts=90),
+            _row(game_id="0042500405", season_year="2025-26",
+                 game_date="2026-06-13T00:00:00", team_abbreviation="NYK",
+                 matchup="NYK @ SAS", pts=94),
+        ]
+        result = load_nba_gamelog_frame(_frame(rows))
+        comps = {g["game_id"]: g["competition"] for g in result["games"]}
+        assert comps["0022500001"] == "REGULAR_SEASON"
+        assert comps["0042500405"] == "PLAYOFF"
+
+    def test_merge_preserves_neutral_count(self):
+        from basketball_agent.data.collectors.nba_parquet import merge_raw_datasets
+
+        rows = [
+            _row(team_abbreviation="MIA", matchup="MIA @ WAS", pts=99,
+                 game_id="0022400147"),
+            _row(team_abbreviation="WAS", matchup="WAS @ MIA", pts=98,
+                 game_id="0022400147"),
+        ]
+        raw = load_nba_gamelog_frame(_frame(rows))
+        assert raw["_meta"]["neutral_site_games"] == 1
+        merged = merge_raw_datasets([raw, raw])
+        assert merged["_meta"]["neutral_site_games"] == 2
+        assert merged["_meta"]["n_games"] == 2
