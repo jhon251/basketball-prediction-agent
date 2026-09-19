@@ -13,7 +13,7 @@ untouched; no model formula or default parameter changes here.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from basketball_agent.agents.ensemble_agent import EnsembleAgent
 from basketball_agent.data.db.repository import Repository
@@ -341,7 +341,11 @@ def run_window_backtest(
 
     fitted: FittedParams | None = None
     if train_seasons is not None:
-        train_start = resolve_train_start(window_start, train_seasons)
+        # anchor the fit window to the season BEFORE the evaluation window:
+        # window_start sits on a season boundary, so resolving against it
+        # directly would produce an empty [start, cutoff) interval
+        anchor = window_start - timedelta(days=1)
+        train_start = resolve_train_start(anchor, train_seasons)
         fitted = fit_v1_params(
             repo, window_start, train_start=train_start,
             n_simulations=min(n_simulations, 150), seed=seed, warmup_games=warmup_games,
