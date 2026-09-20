@@ -178,3 +178,66 @@ class TestRepositoryCacheEquivalence:
                                n_simulations=20, warmup_games=2)
         assert params.training_window[0][:10] == "2024-11-05"
         assert n_before > 0  # there WERE games before the cutoff outside the window
+
+
+class TestWindowBacktestEquivalence:
+    """run_window_backtest's shared-feature single pass must produce exactly
+    the same metrics as four independent BacktestEngines."""
+
+    def _synthetic_repo(self, tmp_path):
+        from basketball_agent.data.collectors.synthetic import (
+            SyntheticLeagueConfig, generate_league,
+        )
+        from basketball_agent.data.db.loader import DataIngestor
+        from basketball_agent.data.schemas.dataset import Dataset
+
+        teams, players, games, team_stats, player_stats = generate_league(
+            SyntheticLeagueConfig(n_teams=6, games_per_pair=2, seed=2025)
+        )
+        ds = Dataset(games=tuple(games), team_stats=tuple(team_stats),
+                     player_stats=tuple(player_stats), teams=tuple(teams),
+                     players=tuple(players))
+        raw = {k: [m.model_dump(mode="json") for m in v] for k, v in
+               (("teams", ds.teams), ("players", ds.players), ("games", ds.games),
+                ("team_stats", ds.team_stats), ("player_stats", ds.player_stats))}
+        db = Database(tmp_path / "eq.db")
+        db.initialize()
+        DataIngestor(db, now=datetime(2025, 3, 1, tzinfo=UTC)).ingest(raw)
+        return Repository(db)
+
+    def test_single_pass_matches_independent_engines(self, tmp_path):
+        from basketball_agent.evaluation.backtest import (
+            BacktestConfig, BacktestEngine, EloPredictor, RandomPredictor,
+            SimulationPredictor, StrengthPredictor,
+        )
+        from basketball_agent.evaluation.experiments import run_window_backtest
+
+        repo = self._synthetic_repo(tmp_path)
+        ws = datetime(2024, 11, 1, tzinfo=UTC)
+        we = datetime(2024, 12, 1, tzinfo=UTC)
+        n_sims, seed, warmup = 30, 7, 2
+
+        window = run_window_backtest(
+            repo, ws, we, train_seasons=None,
+            n_simulations=n_sims, seed=seed, warmup_games=warmup,
+        )
+
+        ids = [g.game_id for g in repo.list_games(status=GameStatus.FINAL)
+               if ws <= g.game_date < we]
+        engines = {
+            "random": RandomPredictor(),
+            "elo": EloPredictor(),
+            "strength": StrengthPredictor(),
+            "simulation": SimulationPredictor(n_simulations=n_sims, seed=seed),
+        }
+        for name, predictor in engines.items():
+            independent = BacktestEngine(
+                repo, predictor,
+                BacktestConfig(n_simulations=n_sims, seed=seed, warmup_games=warmup),
+            ).run(game_ids=ids).summary()
+            shared = window["models"][name]
+            assert shared["n_predicted"] == independent["n_predicted"]
+            assert shared["log_loss"] == independent["log_loss"]
+            assert shared["accuracy"] == independent["accuracy"]
+            assert shared["brier_score"] == independent["brier_score"]
+            assert shared["margin_mae"] == independent["margin_mae"]

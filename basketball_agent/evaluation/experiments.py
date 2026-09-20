@@ -17,18 +17,25 @@ from datetime import datetime, timedelta, timezone
 
 from basketball_agent.agents.ensemble_agent import EnsembleAgent
 from basketball_agent.data.db.repository import Repository
-from basketball_agent.data.schemas.base import Competition, GameStatus
+from basketball_agent.data.schemas.base import (
+    NON_REGULAR_COMPETITIONS, GameStatus,
+)
 from basketball_agent.evaluation.backtest import (
     BacktestConfig,
     BacktestEngine,
+    BacktestRecord,
+    BacktestResult,
     EloPredictor,
     RandomPredictor,
     SimulationPredictor,
     StrengthPredictor,
+    warmup_not_met,
 )
 from basketball_agent.evaluation.calibration import build_reliability_table
 from basketball_agent.evaluation.metrics import log_loss, mae
 from basketball_agent.evaluation.param_tuning import FittedParams, fit_v1_params
+from basketball_agent.features.base import FeatureComputationError
+from basketball_agent.features.feature_pipeline import FeaturePipeline
 from basketball_agent.models.pace_model import PaceConfig
 from basketball_agent.models.score_model import ScoreModelConfig
 from basketball_agent.models.win_probability import WinProbabilityConfig
@@ -300,33 +307,77 @@ def run_window_backtest(
 
     Phase 8-B2: evaluates the frozen-default predictors (random / elo /
     strength / simulation) on every REGULAR_SEASON FINAL game in
-    ``[window_start, window_end)``; features are computed as-of each game's
-    own tip-off over its full prior history (regular season only by default
-    — the BacktestConfig handles that).  Fitting, when requested via
-    ``train_seasons``, happens only on the window immediately BEFORE
-    ``window_start`` and is reported separately — never used to change model
-    defaults.
+    ``[window_start, window_end)`` (explicitly non-regular segments are
+    excluded; untagged legacy rows stay eligible); features are computed
+    as-of each game's own tip-off over its full prior history (regular
+    season only by default — the BacktestConfig handles that).
+
+    The four predictors share ONE feature computation per game: a single
+    chronological pass feeds all predictors, producing records identical to
+    running four independent BacktestEngines (each predictor is a pure
+    function of the same features; the simulation reseeds per game).  This
+    is a performance-only form — at league history depth ~19k games it
+    avoids three redundant feature recomputations per game.
+
+    Fitting, when requested via ``train_seasons``, happens only on the
+    window immediately BEFORE ``window_start`` and is reported separately —
+    never used to change model defaults.
     """
     games = [
-        g for g in repo.list_games(status=GameStatus.FINAL,
-                                   competition=Competition.REGULAR_SEASON)
+        g for g in repo.list_games(
+            status=GameStatus.FINAL,
+            exclude_competitions=tuple(NON_REGULAR_COMPETITIONS),
+        )
         if g.game_date >= window_start and (window_end is None or g.game_date < window_end)
     ]
     games.sort(key=lambda g: (g.game_date, g.game_id))
-    ids = [g.game_id for g in games]
 
     config = BacktestConfig(
         n_simulations=n_simulations, seed=seed, warmup_games=warmup_games,
     )
-    predictors = {
+    pipeline = FeaturePipeline(repo)
+    predictors: dict[str, object] = {
         "random": RandomPredictor(),
         "elo": EloPredictor(),
         "strength": StrengthPredictor(),
         "simulation": SimulationPredictor(n_simulations=n_simulations, seed=seed),
     }
+    records_by: dict[str, list[BacktestRecord]] = {name: [] for name in predictors}
+
+    for g in games:
+        as_of = g.game_date
+        actual = dict(
+            actual_home_win=g.home_score > g.away_score,
+            actual_margin=g.home_score - g.away_score,
+            actual_total=g.home_score + g.away_score,
+            actual_home_score=g.home_score,
+            actual_away_score=g.away_score,
+        )
+        if warmup_not_met(repo, g, as_of, warmup_games):
+            for records in records_by.values():
+                records.append(BacktestRecord(
+                    game_id=g.game_id, as_of=as_of, prediction=None,
+                    skipped_reason=f"warmup < {warmup_games} prior games",
+                ))
+            continue
+        try:
+            features = pipeline.compute(g.game_id, as_of)
+        except FeatureComputationError as exc:
+            for records in records_by.values():
+                records.append(BacktestRecord(
+                    game_id=g.game_id, as_of=as_of, prediction=None,
+                    skipped_reason=f"features: {exc}",
+                ))
+            continue
+        for name, predictor in predictors.items():
+            records_by[name].append(BacktestRecord(
+                game_id=g.game_id, as_of=as_of, prediction=predictor.predict(features),
+                skipped_reason=None, **actual,
+            ))
+
     results: dict[str, dict] = {}
-    for name, predictor in predictors.items():
-        result = BacktestEngine(repo, predictor, config).run(game_ids=ids)
+    for name, records in records_by.items():
+        result = BacktestResult(tuple(records))
         metrics = result.summary()
         sim_recs = [r for r in result.records
                     if r.prediction is not None and r.actual_home_win is not None]
@@ -354,7 +405,7 @@ def run_window_backtest(
     return {
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat() if window_end else "end of data",
-        "n_window_games": len(ids),
+        "n_window_games": len(games),
         "train_seasons": train_seasons,
         "fitted_params": fitted,
         "models": results,

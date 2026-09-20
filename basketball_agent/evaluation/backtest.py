@@ -178,7 +178,7 @@ class BacktestEngine:
         records: list[BacktestRecord] = []
         for g in games:
             as_of = g.game_date
-            if self._warmup_not_met(g, as_of):
+            if warmup_not_met(self._repo, g, as_of, self._config.warmup_games):
                 records.append(BacktestRecord(
                     game_id=g.game_id, as_of=as_of, prediction=None,
                     skipped_reason=f"warmup < {self._config.warmup_games} prior games",
@@ -203,20 +203,28 @@ class BacktestEngine:
                 ))
         return BacktestResult(tuple(records))
 
-    def _warmup_not_met(self, g, as_of: datetime) -> bool:
-        if self._config.warmup_games <= 0:
-            return False
-        history = self._repo.list_games(as_of=as_of, status=GameStatus.FINAL)
-        for team_id in (g.home_team_id, g.away_team_id):
-            prior = sum(
-                1 for h in history
-                if h.game_id != g.game_id
-                and h.game_date < as_of
-                and team_id in (h.home_team_id, h.away_team_id)
-            )
-            if prior < self._config.warmup_games:
-                return True
+
+def warmup_not_met(
+    repo: Repository, g, as_of: datetime, warmup_games: int
+) -> bool:
+    """True while either team has fewer than ``warmup_games`` prior games.
+
+    Shared by :class:`BacktestEngine` and the multi-season window backtest so
+    both skip exactly the same games (Phase 8-B2).
+    """
+    if warmup_games <= 0:
         return False
+    history = repo.list_games(as_of=as_of, status=GameStatus.FINAL)
+    for team_id in (g.home_team_id, g.away_team_id):
+        prior = sum(
+            1 for h in history
+            if h.game_id != g.game_id
+            and h.game_date < as_of
+            and team_id in (h.home_team_id, h.away_team_id)
+        )
+        if prior < warmup_games:
+            return True
+    return False
 
 
 class BacktestResult:
