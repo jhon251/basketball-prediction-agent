@@ -11,9 +11,11 @@ Phase 8-B1 已接入第一份真实数据：`llimllib/nba_data` 的 2025-26 赛�
 gamelog（`gamelog_2026.parquet`，1,322 场，30 队，2025-10-21 → 2026-06-13，
 含季后赛/附加赛/杯赛决赛；季前赛与全明星排除）。快照 `90d58d1a28fd`，
 SHA-256 `f992e6659dee93cff9964471e30e0d16929530360f5f135d41cfb00ee921d2bf`。
-全季 17 个赛季的 `gamelogs.parquet`（41,038 行）已下载至
-`C:\NBA_DATA\llimllib\`，因参数拟合框架当前按全量训练窗 O(历史×网格) 运行，
-多赛季回测的规模优化完成后再入库。
+
+Phase 8-B2 已升级为多赛季基础：全 17 季 `gamelogs.parquet`
+（SHA-256 `81d2a26c63cfb9777b48d171dd8332211ee49777de8e53a9c834c4578075506c`，
+41,038 行 → 20,440 场，含 competition 标记）已入库，快照 `8a70477780e3`。
+多赛季回测协议与结果见 `docs/MULTI_SEASON_RESULTS.md`。
 
 ## 支持的输入格式（ingest 层，核心模型零改动）
 
