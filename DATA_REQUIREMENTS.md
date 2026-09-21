@@ -3,8 +3,8 @@
 ## SOURCE_STATUS
 
 ```text
-SOURCE_STATUS: AVAILABLE (NBA only)
-FIRST_REAL_DATA_INGESTED: 2026-09-19
+SOURCE_STATUS: AVAILABLE (NBA + EuroLeague)
+FIRST_REAL_DATA_INGESTED: 2026-09-19 (NBA) / 2026-09-21 (EuroLeague)
 ```
 
 Phase 8-B1 已接入第一份真实数据：`llimllib/nba_data` 的 2025-26 赛季球队
@@ -16,6 +16,13 @@ Phase 8-B2 已升级为多赛季基础：全 17 季 `gamelogs.parquet`
 （SHA-256 `81d2a26c63cfb9777b48d171dd8332211ee49777de8e53a9c834c4578075506c`，
 41,038 行 → 20,440 场，含 competition 标记）已入库，快照 `8a70477780e3`。
 多赛季回测协议与结果见 `docs/MULTI_SEASON_RESULTS.md`。
+
+Phase 8-B3 已接入 EuroLeague：`live.euroleague.net/api`（Header + Boxscore
+端点，无需 Key）抓取 2024-25 全季（`C:\EURO_DATA\euroleague_E2024_raw.json`，
+330 场 = 306 常规赛 + 3 附加赛 + 21 季后赛含 Final4）。球队存库 id 统一
+`EL-` 前缀（官方 CodeTeam，`MIL` 与 NBA 密尔沃基真实撞码的教训）；
+40 分钟制 `regulation_seconds=2400`；特征历史按目标场次自身联赛硬隔离。
+多联赛契约见 `docs/MULTI_LEAGUE_SCHEMA.md`。
 
 ## 支持的输入格式（ingest 层，核心模型零改动）
 

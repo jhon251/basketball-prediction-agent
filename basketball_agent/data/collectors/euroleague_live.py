@@ -34,7 +34,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from basketball_agent.data.collectors.nba_teams import NBA_TEAM_IDS
 from basketball_agent.data.schemas.base import Competition, GameStatus, League
 from basketball_agent.data.schemas.game import Game, TeamGameStats
 from basketball_agent.data.schemas.team import Team
@@ -48,28 +47,31 @@ PHASE_TO_COMPETITION: dict[str, str] = {
     "FINAL FOUR": "PLAYOFF",  # the Final Four is the playoff culminating phase
 }
 
-# canonical id -> home-venue IANA timezone (UTC conversion of local tip-off)
+# canonical id -> home-venue IANA timezone (UTC conversion of local tip-off).
+# Canonical ids are the OFFICIAL CodeTeam values observed in the E2024 bundle
+# (18 clubs); every other spelling lives in ALIAS_TO_TEAM.
 TEAM_TIMEZONES: dict[str, str] = {
-    "BER": "Europe/Berlin",     # ALBA Berlin
-    "BAM": "Europe/Berlin",     # Bayern Munich
-    "PAN": "Europe/Athens",     # Panathinaikos (TV code PAO)
-    "OLY": "Europe/Athens",     # Olympiacos
-    "RMA": "Europe/Madrid",     # Real Madrid
+    "ASV": "Europe/Paris",      # LDLC ASVEL Villeurbanne
     "BAR": "Europe/Madrid",     # FC Barcelona
-    "VAL": "Europe/Madrid",     # Valencia Basket
-    "FEN": "Europe/Istanbul",   # Fenerbahce
-    "EFS": "Europe/Istanbul",   # Anadolu Efes
+    "BAS": "Europe/Madrid",     # Baskonia Vitoria-Gasteiz
+    "BER": "Europe/Berlin",     # ALBA Berlin
+    "IST": "Europe/Istanbul",   # Anadolu Efes Istanbul
+    "MAD": "Europe/Madrid",     # Real Madrid
     "MCO": "Europe/Monaco",     # AS Monaco
-    "ASV": "Europe/Paris",      # ASVEL Villeurbanne
-    "PRB": "Europe/Paris",      # Paris Basketball
-    "MTA": "Asia/Jerusalem",    # Maccabi Tel Aviv
+    "MIL": "Europe/Rome",       # EA7 Emporio Armani Milan
+    "MUN": "Europe/Berlin",     # FC Bayern Munich
+    "OLY": "Europe/Athens",     # Olympiacos Piraeus
+    "PAN": "Europe/Athens",     # Panathinaikos AKTOR Athens
+    "PAR": "Europe/Belgrade",   # Partizan Mozzart Bet Belgrade
+    "PRS": "Europe/Paris",      # Paris Basketball
+    "RED": "Europe/Belgrade",   # Crvena Zvezda Meridianbet Belgrade
+    "TEL": "Asia/Jerusalem",    # Maccabi Playtika Tel Aviv
+    "ULK": "Europe/Istanbul",   # Fenerbahce Beko Istanbul
+    "VIR": "Europe/Rome",       # Virtus Segafredo Bologna
     "ZAL": "Europe/Vilnius",    # Zalgiris Kaunas
-    "PTN": "Europe/Belgrade",   # Partizan Belgrade
-    "CZV": "Europe/Belgrade",   # Crvena Zvezda Belgrade
-    "VIR": "Europe/Rome",       # Virtus Bologna
 }
 
-# every known spelling (codes, TV codes, name substrings) -> canonical id
+# every known spelling (codes, TV codes, name variants) -> canonical id
 ALIAS_TO_TEAM: dict[str, str] = {}
 for _canon in TEAM_TIMEZONES:
     ALIAS_TO_TEAM[_canon.lower()] = _canon
@@ -78,24 +80,28 @@ for _canon, _aliases in {
             "panathinaikos opap athens"),
     "OLY": ("olp", "olympiakos", "olympiacos", "olympiacos piraeus"),
     "BER": ("alba", "alba berlin"),
-    "BAM": ("bay", "bayern", "fc bayern munich", "bayern munich"),
-    "RMA": ("rmb", "real madrid", "real madrid baloncesto"),
+    "MUN": ("bay", "bam", "bayern", "fc bayern munich", "bayern munich"),
+    "MAD": ("rma", "rmb", "real madrid", "real madrid baloncesto"),
     "BAR": ("fcb", "barcelona", "fc barcelona", "fc barcelona lassa"),
+    "BAS": ("baskonia", "baskonia vitoria-gasteiz", "baskonia alaves",
+            "saski baskonia"),
     "VAL": ("vbc", "valencia", "valencia basket"),
-    "FEN": ("fbb", "fenerbahce", "fenerbahce beko istanbul",
+    "ULK": ("fen", "fbb", "fenerbahce", "fenerbahce beko istanbul",
             "fenerbahce ulker istanbul"),
-    "EFS": ("efes", "ist", "anadolu efes", "anadolu efes istanbul"),
+    "IST": ("efes", "efs", "anadolu efes", "anadolu efes istanbul"),
     "MCO": ("asm", "monaco", "as monaco", "as monaco basket"),
     "ASV": ("tdl", "asvel", "asvel villeurbanne", "ldlc asvel villeurbanne"),
-    "PRB": ("par", "pab", "paris basketball"),
-    "MTA": ("mtl", "maccabi", "maccabi tel aviv",
+    "PRS": ("prb", "pab", "paris", "paris basketball"),
+    "TEL": ("mta", "mtl", "maccabi", "maccabi tel aviv",
             "maccabi playtika tel aviv", "maccabi fox tel aviv"),
     "ZAL": ("ztg", "zalgiris", "zalgiris kaunas"),
-    "PTN": ("part", "partizan", "partizan belgrade",
+    "PAR": ("part", "ptn", "partizan", "partizan belgrade",
             "partizan mozzart bet belgrade"),
-    "CZV": ("red", "zvezda", "crvena zvezda", "crvena zvezda mts belgrade",
-            "crvena zvezda meridianbet belgrade"),
+    "RED": ("czv", "red star", "zvezda", "crvena zvezda",
+            "crvena zvezda mts belgrade", "crvena zvezda meridianbet belgrade"),
     "VIR": ("bol", "virtus", "virtus bologna", "virtus segafredo bologna"),
+    "MIL": ("eam", "ax milan", "olimpija milan", "milan",
+            "ea7 emporio armani milan", "emporio armani milan"),
 }.items():
     for _alias in _aliases:
         ALIAS_TO_TEAM.setdefault(_alias, _canon)
@@ -106,19 +112,21 @@ class EuroLeagueDataError(RuntimeError):
 
 
 def resolve_team(raw: str) -> str:
-    """Map any known EuroLeague code/name to its canonical id."""
+    """Map any known EuroLeague code/name to its canonical STORED id.
+
+    Stored ids are prefixed ``EL-`` (e.g. the official code ``MAD`` becomes
+    ``EL-MAD``).  The prefix is load-bearing: EuroLeague's ``MIL`` (EA7
+    Milan) really does collide with the NBA's ``MIL`` (Milwaukee), so bare
+    codes can never be trusted as global keys (Phase 8-B3, real-data find).
+    """
     key = str(raw).strip().lower()
-    team_id = ALIAS_TO_TEAM.get(key)
-    if team_id is None:
+    code = ALIAS_TO_TEAM.get(key)
+    if code is None:
         raise EuroLeagueDataError(
             f"unknown EuroLeague team code/name: {raw!r} (extend "
             "euroleague_live.ALIAS_TO_TEAM; never guess)"
         )
-    if team_id in NBA_TEAM_IDS:
-        raise EuroLeagueDataError(
-            f"EuroLeague canonical id {team_id!r} collides with an NBA team id"
-        )
-    return team_id
+    return f"EL-{code}"
 
 
 def _parse_local_datetime(date_raw: str, hour_raw: str, tz_name: str) -> datetime:
@@ -258,7 +266,7 @@ def parse_euroleague_bundle(bundle: dict) -> dict:
 
         home_name = str(header.get("TeamA", "")).strip()
         away_name = str(header.get("TeamB", "")).strip()
-        tz_name = TEAM_TIMEZONES.get(home_id)
+        tz_name = TEAM_TIMEZONES.get(home_id.removeprefix("EL-"))
         if tz_name is None:
             raise EuroLeagueDataError(
                 f"game {game_id}: no timezone for home team {home_id!r}"

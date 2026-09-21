@@ -72,18 +72,25 @@ def _bundle() -> dict:
 
 class TestTeamResolution:
     def test_codes_and_aliases_resolve(self):
-        assert resolve_team("BER") == "BER"
-        assert resolve_team("PAO") == "PAN"       # TV code alias
-        assert resolve_team("Panathinaikos AKTOR Athens") == "PAN"
+        assert resolve_team("BER") == "EL-BER"
+        assert resolve_team("PAO") == "EL-PAN"      # TV code alias
+        assert resolve_team("Panathinaikos AKTOR Athens") == "EL-PAN"
+        assert resolve_team("MAD") == "EL-MAD"      # official code, not RMA
 
     def test_unknown_team_fails(self):
         with pytest.raises(EuroLeagueDataError, match="unknown EuroLeague team"):
             resolve_team("ZZZ")
 
-    def test_canonical_ids_disjoint_from_nba(self):
+    def test_stored_ids_cannot_collide_with_nba(self):
+        """EuroLeague MIL (EA7 Milan) really collides with the NBA's MIL —
+        the EL- prefix is the guard, verified against the real NBA id set."""
         from basketball_agent.data.collectors.nba_teams import NBA_TEAM_IDS
 
-        for team_id in set(resolve_team(a) for a in ("BER", "PAN", "PAO")):
+        assert "MIL" in NBA_TEAM_IDS
+        el_id = resolve_team("MIL")
+        assert el_id == "EL-MIL"
+        assert el_id not in NBA_TEAM_IDS
+        for team_id in (resolve_team(a) for a in ("BER", "PAN", "MAD", "ULK")):
             assert team_id not in NBA_TEAM_IDS
 
 
@@ -95,14 +102,14 @@ class TestBundleParsing:
         assert game["game_id"] == "E2024-0001"
         assert game["league"] == "EUROLEAGUE"
         assert game["season"] == "2024-25"
-        assert game["home_team_id"] == "BER" and game["away_team_id"] == "PAN"
+        assert game["home_team_id"] == "EL-BER" and game["away_team_id"] == "EL-PAN"
         assert game["home_score"] == 77 and game["away_score"] == 87
         assert game["status"] == "FINAL"
         assert game["competition"] == "REGULAR_SEASON"
         # 18:45 Europe/Berlin on 03 Oct (CEST, UTC+2) -> 16:45 UTC
         assert game["game_date"].replace("+00:00", "Z") == "2024-10-03T16:45:00Z"
 
-        home = next(ts for ts in raw["team_stats"] if ts["team_id"] == "BER")
+        home = next(ts for ts in raw["team_stats"] if ts["team_id"] == "EL-BER")
         # 2P/3P split -> combined fg/fga
         assert home["fg"] == 30 and home["fga"] == 66
         assert home["fg3"] == 9 and home["fg3a"] == 31
@@ -116,8 +123,8 @@ class TestBundleParsing:
         assert raw["_meta"]["possessions_estimated_for"] == 2
 
         teams = {t["team_id"]: t for t in raw["teams"]}
-        assert teams["PAN"]["league"] == "EUROLEAGUE"
-        assert teams["PAN"]["name"] == "PANATHINAIKOS AKTOR ATHENS"
+        assert teams["EL-PAN"]["league"] == "EUROLEAGUE"
+        assert teams["EL-PAN"]["name"] == "PANATHINAIKOS AKTOR ATHENS"
 
     def test_playin_and_final4_phases(self):
         bundle = _bundle()
