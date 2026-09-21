@@ -160,6 +160,8 @@ def _build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--train-seasons", type=int, default=1,
                     help="fit window before the evaluation window, in NBA seasons "
                          "(1/3/5; 0 skips fitting)")
+    wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE"],
+                    help="restrict the evaluation window to one league (default: all)")
     wb.add_argument("--n-simulations", type=int, default=100)
     wb.add_argument("--seed", type=int, default=7)
     wb.add_argument("--warmup", type=int, default=5)
@@ -180,6 +182,22 @@ def _open_db():
     db = Database(settings.db_path)
     db.initialize()
     return db, settings
+
+
+def _load_any_games_file(path: str, season: str | None = None) -> dict:
+    """Format dispatch for ingest/validate: .json bundles are EuroLeague
+    live-API raw bundles; everything else goes through the NBA loaders."""
+    from pathlib import Path as _Path
+
+    if _Path(path).suffix.lower() == ".json":
+        from basketball_agent.data.collectors.euroleague_live import (
+            load_euroleague_bundle_file,
+        )
+
+        return load_euroleague_bundle_file(path)
+    from basketball_agent.data.collectors.nba_parquet import load_nba_games_file
+
+    return load_nba_games_file(path, season=season)
 
 
 def _parse_as_of(raw: str | None) -> datetime | None:
@@ -280,7 +298,6 @@ def _cmd_ingest(args) -> int:
     from basketball_agent.data.collectors.manifest import ProcessedDataStore, RawDataStore
     from basketball_agent.data.collectors.nba_csv import IngestDataError
     from basketball_agent.data.collectors.nba_parquet import (
-        load_nba_games_file,
         merge_raw_datasets,
     )
     from basketball_agent.data.db.loader import DataIngestor
@@ -293,7 +310,7 @@ def _cmd_ingest(args) -> int:
         raws = []
         for path in args.paths:
             store.register(args.source, path)  # verbatim copy + SHA-256 manifest per file
-            raws.append(load_nba_games_file(path, season=args.season))
+            raws.append(_load_any_games_file(path, season=args.season))
         merged = merge_raw_datasets(raws)
         DataIngestor(db).ingest(merged)
         processed = ProcessedDataStore(settings.processed_dir).save(
@@ -324,13 +341,12 @@ def _cmd_validate(args) -> int:
     from basketball_agent.agents.validation_agent import DataValidationAgent
     from basketball_agent.data.collectors.nba_csv import IngestDataError
     from basketball_agent.data.collectors.nba_parquet import (
-        load_nba_games_file,
         merge_raw_datasets,
     )
     from basketball_agent.data.validators.parsing import parse_dataset
 
     try:
-        raws = [load_nba_games_file(p, season=args.season) for p in args.paths]
+        raws = [_load_any_games_file(p, season=args.season) for p in args.paths]
         merged = merge_raw_datasets(raws)
         dataset, parse_errors = parse_dataset(merged)
         report = DataValidationAgent().validate(dataset)
@@ -464,6 +480,7 @@ def _cmd_experiments(args) -> int:
 
 
 def _cmd_window_backtest(args) -> int:
+    from basketball_agent.data.schemas.base import League
     from basketball_agent.evaluation.experiments import run_window_backtest
 
     try:
@@ -477,6 +494,7 @@ def _cmd_window_backtest(args) -> int:
             Repository(db), window_start, window_end,
             train_seasons=(args.train_seasons or None),
             n_simulations=args.n_simulations, seed=args.seed, warmup_games=args.warmup,
+            league=(League(args.league) if args.league else None),
         )
     except Exception as exc:  # noqa: BLE001 — CLI boundary
         print(f"ERROR: {exc}", file=sys.stderr)

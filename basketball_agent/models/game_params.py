@@ -43,6 +43,18 @@ class GamePredictionParams:
     elo_win_prob_home: float | None
     strength_win_prob_home: float
     provenance: FeatureProvenance
+    # League-specific regulation length (Phase 8-B3).  Default is the NBA's
+    # 48 minutes so every pre-existing constructor keeps its behaviour; the
+    # 40-minute FIBA leagues carry 2400.0 explicitly.
+    regulation_seconds: float = 2880.0
+
+
+# Regulation length per league (Phase 8-B3).  Unknown/legacy (None) defaults
+# to the NBA value; extend this table when a new league is ingested.
+LEAGUE_REGULATION_SECONDS: dict[str, float] = {
+    "NBA": 2880.0,        # 4 x 12 min
+    "EUROLEAGUE": 2400.0, # 4 x 10 min (FIBA)
+}
 
 
 def build_game_params(
@@ -105,4 +117,7 @@ def build_game_params(
         elo_win_prob_home=features.elo_win_prob_home,
         strength_win_prob_home=win_prob,
         provenance=features.provenance,
+        regulation_seconds=LEAGUE_REGULATION_SECONDS.get(
+            features.game_league or "NBA", 2880.0
+        ),
     )

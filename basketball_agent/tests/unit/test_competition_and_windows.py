@@ -241,3 +241,114 @@ class TestWindowBacktestEquivalence:
             assert shared["accuracy"] == independent["accuracy"]
             assert shared["brier_score"] == independent["brier_score"]
             assert shared["margin_mae"] == independent["margin_mae"]
+
+
+class TestLeagueIsolation:
+    """EuroLeague and NBA histories must never mix (Phase 8-B3)."""
+
+    @pytest.fixture
+    def cross_league_db(self, scheduled_target):
+        """NBA fixture history + two real-style EuroLeague FINAL games."""
+        from basketball_agent.data.schemas.base import League
+        from basketball_agent.data.schemas.game import Game, TeamGameStats
+
+        repo = Repository(scheduled_target)
+        from basketball_agent.data.schemas.team import Team
+
+        repo.upsert_team(Team(
+            team_id="PAO", league=League.EUROLEAGUE,
+            name="Panathinaikos AKTOR Athens", abbreviation="PAO"))
+        repo.upsert_team(Team(
+            team_id="BER", league=League.EUROLEAGUE,
+            name="ALBA Berlin", abbreviation="BER"))
+
+        def _el_stats(gid, team, points, poss=75.0):
+            return TeamGameStats(
+                game_id=gid, team_id=team, is_home=team == "BER", minutes=200,
+                points=points, possessions=poss,
+                fg=30, fga=60, fg3=9, fg3a=26, ft=13, fta=18,
+                orb=10, drb=25, trb=35, ast=18, tov=12, stl=6, blk=2, pf=18,
+            )
+
+        repo.insert_game(Game(
+            game_id="E2024-000001", league=League.EUROLEAGUE, season="2024-25",
+            game_date=datetime(2024, 10, 3, 17, 45, tzinfo=UTC),
+            home_team_id="BER", away_team_id="PAO",
+            home_score=77, away_score=87, status=GameStatus.FINAL,
+        ))
+        repo.insert_team_stats(_el_stats("E2024-000001", "BER", 77))
+        repo.insert_team_stats(_el_stats("E2024-000001", "PAO", 87))
+        repo.insert_game(Game(
+            game_id="E2024-000002", league=League.EUROLEAGUE, season="2024-25",
+            game_date=datetime(2024, 10, 8, 17, 45, tzinfo=UTC),
+            home_team_id="PAO", away_team_id="BER",
+            home_score=95, away_score=80, status=GameStatus.FINAL,
+        ))
+        repo.insert_team_stats(_el_stats("E2024-000002", "PAO", 95))
+        repo.insert_team_stats(_el_stats("E2024-000002", "BER", 80))
+        return scheduled_target
+
+    def test_euroleague_history_excludes_nba(self, cross_league_db):
+        from basketball_agent.data.schemas.base import GameStatus, League
+        from basketball_agent.data.schemas.game import Game
+
+        repo = Repository(cross_league_db)
+        repo.insert_game(Game(
+            game_id="E2024-000003", league=League.EUROLEAGUE, season="2024-25",
+            game_date=datetime(2024, 10, 15, 17, 45, tzinfo=UTC),
+            home_team_id="BER", away_team_id="PAO",
+            home_score=None, away_score=None, status=GameStatus.SCHEDULED,
+        ))
+        features = FeaturePipeline(repo).compute(
+            "E2024-000003", datetime(2024, 10, 14, tzinfo=UTC)
+        )
+        assert set(features.provenance.games_used) == {"E2024-000001", "E2024-000002"}
+        assert features.home.games_played == 2
+        assert features.game_league == "EUROLEAGUE"
+
+    def test_nba_history_excludes_euroleague(self, cross_league_db):
+        features = FeaturePipeline(Repository(cross_league_db)).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        assert not any(g.startswith("E2024") for g in features.provenance.games_used)
+        assert features.game_league == "NBA"
+
+
+class TestRegulationSeconds:
+    def test_nba_params_keep_2880(self, scheduled_target):
+        from basketball_agent.models.game_params import build_game_params
+
+        repo = Repository(scheduled_target)
+        features = FeaturePipeline(repo).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        assert build_game_params(features).regulation_seconds == 2880.0
+
+    def test_euroleague_params_get_2400(self, scheduled_target):
+        from dataclasses import replace
+        from basketball_agent.models.game_params import build_game_params
+
+        repo = Repository(scheduled_target)
+        features = FeaturePipeline(repo).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        el_features = replace(features, game_league="EUROLEAGUE")
+        assert build_game_params(el_features).regulation_seconds == 2400.0
+
+    def test_simulator_uses_40min_quarters(self, scheduled_target):
+        from dataclasses import replace
+        import random as _random
+        from basketball_agent.models.game_params import build_game_params
+        from basketball_agent.simulation.game_simulator import GameSimulator
+
+        repo = Repository(scheduled_target)
+        features = FeaturePipeline(repo).compute(
+            "20241120_LAL_BOS", datetime(2024, 11, 19, 12, 0, tzinfo=UTC)
+        )
+        el_params = build_game_params(replace(features, game_league="EUROLEAGUE"))
+        game = GameSimulator().simulate(el_params, _random.Random(7))
+        assert len(game.quarters) == 4  # one 10-minute quarter each, no OT here
+        # possession count still tracks expected pace: 4x10min == 40 game-minutes
+        expected_total_poss = 2.0 * el_params.expected_pace
+        actual = game.home_possessions + game.away_possessions
+        assert abs(actual - expected_total_poss) / expected_total_poss < 0.08

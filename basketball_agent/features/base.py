@@ -129,3 +129,6 @@ class GameFeatures:
     away_available_share: float
     # Audit
     provenance: FeatureProvenance
+    # League identity of the target game (Phase 8-B3): drives per-league
+    # parameters (e.g. 40-minute regulation) — history is already league-scoped
+    game_league: str | None = None

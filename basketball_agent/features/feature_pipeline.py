@@ -91,7 +91,7 @@ class FeaturePipeline:
                 f"({game.game_date.isoformat()}): a prediction happens before the game"
             )
 
-        history = self._eligible_history(game_id, as_of)
+        history = self._eligible_history(game_id, as_of, league=game.league)
         games_by_id = {g.game_id: g for g in history}
         stats_by_game = self._team_stats_by_game(games_by_id, as_of)
         derived = self._derive_per_team(stats_by_game, games_by_id)
@@ -147,6 +147,7 @@ class FeaturePipeline:
             home=home_features,
             away=away_features,
             league=league,
+            game_league=game.league.value,
             home_pace=home_features.pace,
             away_pace=away_features.pace,
             expected_pace=expected_pace,
@@ -164,15 +165,19 @@ class FeaturePipeline:
 
     # ---------------------------------------------------------------- helpers
 
-    def _eligible_history(self, game_id: str, as_of: datetime):
+    def _eligible_history(self, game_id: str, as_of: datetime, league=None):
         """FINAL games strictly before as_of, target game excluded.
+
+        History is scoped to the TARGET GAME'S OWN LEAGUE (Phase 8-B3): NBA
+        and EuroLeague histories never mix, so no Elo/ratings/baselines can
+        be shared across leagues even in one database.
 
         With ``window_days`` set, only games within the rolling window are
         kept.  Defense in depth on top of the repository's ``as_of`` filter:
         any violation here raises AssertionError, i.e. FAIL, per spec §2.2.
         """
         history = [
-            g for g in self._repo.list_games(as_of=as_of, status=GameStatus.FINAL)
+            g for g in self._repo.list_games(as_of=as_of, status=GameStatus.FINAL, league=league)
             if g.game_date < as_of and g.game_id != game_id
         ]
         if not self._include_non_regular_history:

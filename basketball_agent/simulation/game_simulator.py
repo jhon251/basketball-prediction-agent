@@ -70,15 +70,31 @@ class GameSimulator:
             home_tp.team_id: home_roster or [],
             away_tp.team_id: away_roster or [],
         }
-        seconds_per_possession = REGULATION_SECONDS / (2.0 * params.expected_pace)
-
-        state = GameState(home_team_id=home_tp.team_id, away_team_id=away_tp.team_id)
+        # League-aware game length (Phase 8-B3): NBA keeps 2880 s / 720 s
+        # quarters; a 40-minute league carries regulation_seconds=2400.0 in
+        # its params and gets 600 s quarters.  When the params disagree with
+        # the configured quarter length, an effective config is derived for
+        # this game only — explicit custom configs still win for NBA games.
+        regulation = getattr(params, "regulation_seconds", REGULATION_SECONDS)
         cfg = self._config
+        if abs(regulation - REGULATION_SECONDS) > 1e-9:
+            cfg = SimulationConfig(
+                quarter_seconds=regulation / 4.0,
+                overtime_seconds=cfg.overtime_seconds,
+                max_overtimes=cfg.max_overtimes,
+            )
+        seconds_per_possession = regulation / (2.0 * params.expected_pace)
+
+        state = GameState(
+            home_team_id=home_tp.team_id,
+            away_team_id=away_tp.team_id,
+            seconds_remaining=cfg.quarter_seconds,
+        )
 
         while True:
             if state.seconds_remaining <= 0:
                 state.record_quarter()
-                if self._advance_quarter(state, home_tp.team_id, away_tp.team_id):
+                if self._advance_quarter(state, home_tp.team_id, away_tp.team_id, cfg):
                     break
                 continue
             self._run_possession(state, params_by_team, seconds_per_possession, rng, rosters)
@@ -119,9 +135,10 @@ class GameSimulator:
             possession=rescale_to_ppp(team.possession, ppp, ScoreModelConfig()),
         )
 
-    def _advance_quarter(self, state: GameState, home_id: str, away_id: str) -> bool:
+    def _advance_quarter(
+        self, state: GameState, home_id: str, away_id: str, cfg: SimulationConfig
+    ) -> bool:
         """Advance the clock after a finished quarter; True when the game is over."""
-        cfg = self._config
         if state.quarter < 4:
             state.start_quarter(
                 state.quarter + 1,

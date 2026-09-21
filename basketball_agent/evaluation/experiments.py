@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from basketball_agent.agents.ensemble_agent import EnsembleAgent
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import (
-    NON_REGULAR_COMPETITIONS, GameStatus,
+    NON_REGULAR_COMPETITIONS, GameStatus, League,
 )
 from basketball_agent.evaluation.backtest import (
     BacktestConfig,
@@ -302,6 +302,7 @@ def run_window_backtest(
     n_simulations: int = 100,
     seed: int = 7,
     warmup_games: int = 5,
+    league: League | None = None,
 ) -> dict:
     """Multi-season walk-forward backtest over one evaluation window.
 
@@ -310,7 +311,9 @@ def run_window_backtest(
     ``[window_start, window_end)`` (explicitly non-regular segments are
     excluded; untagged legacy rows stay eligible); features are computed
     as-of each game's own tip-off over its full prior history (regular
-    season only by default — the BacktestConfig handles that).
+    season only by default — the BacktestConfig handles that).  ``league``
+    restricts the window to one league's games (Phase 8-B3; feature history
+    is always league-scoped anyway).
 
     The four predictors share ONE feature computation per game: a single
     chronological pass feeds all predictors, producing records identical to
@@ -326,6 +329,7 @@ def run_window_backtest(
     games = [
         g for g in repo.list_games(
             status=GameStatus.FINAL,
+            league=league,
             exclude_competitions=tuple(NON_REGULAR_COMPETITIONS),
         )
         if g.game_date >= window_start and (window_end is None or g.game_date < window_end)
