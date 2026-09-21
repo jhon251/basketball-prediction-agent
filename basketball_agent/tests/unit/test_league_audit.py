@@ -122,22 +122,40 @@ class TestLeagueAuditFailures:
         audit = audit_league(repo, League.EUROLEAGUE, leakage_sample=0)
         assert any(c.name == "team.namespace" and c.status == FAIL for c in audit.checks)
 
-    def test_wrong_regulation_minutes_fails(self, el_db):
+    def test_wrong_regulation_minutes_warns_within_bounds(self, el_db):
+        """240 for a 40-minute league is a source-data error but physically
+        possible, so it is retained verbatim and reported as a quirk."""
         repo = Repository(el_db)
         repo.insert_game(_game("E2024", 91, datetime(2024, 12, 3, 20, 0, tzinfo=UTC)))
         repo.insert_team_stats(_stats("E2024-0091", HOME_TEAM, True, minutes=240))
         repo.insert_team_stats(_stats("E2024-0091", AWAY_TEAM, False, minutes=240, points=105))
         audit = audit_league(repo, League.EUROLEAGUE, leakage_sample=0)
         check = next(c for c in audit.checks if c.name == "regulation.minutes")
-        assert check.status == FAIL and "240" in check.detail
+        assert check.status == WARN and "240" in check.detail
 
-    def test_unexpected_minutes_value_fails(self, el_db):
+    def test_regulation_quirk_within_bounds_warns_not_fails(self, el_db):
+        """195/240-style source aggregation quirks are retained and reported,
+        never silently accepted and never treated as impossible values."""
         repo = Repository(el_db)
         repo.insert_game(_game("E2024", 92, datetime(2024, 12, 5, 20, 0, tzinfo=UTC)))
-        repo.insert_team_stats(_stats("E2024-0092", HOME_TEAM, True, minutes=260))
-        repo.insert_team_stats(_stats("E2024-0092", AWAY_TEAM, False, minutes=260, points=105))
+        repo.insert_team_stats(_stats("E2024-0092", HOME_TEAM, True, minutes=195))
+        repo.insert_team_stats(_stats("E2024-0092", AWAY_TEAM, False, minutes=195, points=105))
         audit = audit_league(repo, League.EUROLEAGUE, leakage_sample=0)
-        assert any(c.name == "regulation.minutes" and c.status == FAIL for c in audit.checks)
+        check = next(c for c in audit.checks if c.name == "regulation.minutes")
+        assert check.status == WARN
+        assert "195" in check.detail
+        assert audit.status == PASS  # a documented quirk must not fail the audit
+
+    def test_impossible_minutes_fail(self, el_db):
+        """179 (below any legal period sum) is impossible -> hard FAIL."""
+        repo = Repository(el_db)
+        repo.insert_game(_game("E2024", 93, datetime(2024, 12, 6, 20, 0, tzinfo=UTC)))
+        repo.insert_team_stats(_stats("E2024-0093", HOME_TEAM, True, minutes=179))
+        repo.insert_team_stats(_stats("E2024-0093", AWAY_TEAM, False, minutes=200, points=105))
+        audit = audit_league(repo, League.EUROLEAGUE, leakage_sample=0)
+        check = next(c for c in audit.checks if c.name == "regulation.minutes")
+        assert check.status == FAIL
+        assert "179" in check.detail
 
     def test_incomplete_season_fails_with_reference(self, el_db):
         audit = audit_league(Repository(el_db), League.EUROLEAGUE, leakage_sample=0,

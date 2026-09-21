@@ -1,107 +1,126 @@
-# Phase 8-B4 — EuroLeague 多赛季回测基础（实验记录）
+# Phase 8-B4 — EuroLeague 多赛季真实回测基础（已完成）
 
-日期：本轮会话 ｜ 状态：**基础完成，多赛季数据获取受阻（需用户侧联网）**
-数据：真实 EuroLeague 2024-25（`E2024`，330 场）— **仅 1 个赛季在库**
+数据来源：`live.euroleague.net/api`（Header + Boxscore，无需 Key）
+采集：`tools/fetch_euroleague_bundle.py`（Python urllib；429 退避 + 每 10 场原子 checkpoint + `--resume`）
+入库链路：`validate → ingest --source euroleague_live → processed + raw manifest(SHA-256) + snapshot`
 
-## 1. 本轮交付（代码，不触碰 NBA）
+## 1. 实际获得的赛季与比赛数量（6 季，全部真实）
 
-| 交付物 | 说明 |
-|---|---|
-| `basketball_agent/evaluation/league_audit.py` | 单联赛审计（验收第 8 项 9 组检查）：game_id 格式/唯一、EL- 命名空间、赛季边界、competition、40/48 分钟规制+加时步长、timezone、缺失比赛、FINAL 一致性、provenance/leakage 采样（含跨联赛历史检查）。只读。 |
-| `basketball league-audit --league {NBA,EUROLEAGUE}` | CLI 入口；FAIL 时退出码 1 |
-| `tools/fetch_euroleague_bundle.py` | **用户侧联网**抓取器：`seasonCode=E<yyyy>` × `gameCode=1..N` 循环，输出与 `euroleague_live.py` 契约完全一致的 bundle（可 `--resume`） |
-| 测试 | 单元 19 个（审计各失败路径 + bundle 契约）＋ 真实数据集成 5 个（EL 审计 / NBA 未受影响 / EL 窗口 / NBA 窗口） |
+| seasonCode | 赛季 | 场次 | 常规赛 | 其他 | 日期范围 | 快照 |
+|---|---|---|---|---|---|---|
+| E2019 | 2019-20 | 252 | 252 | 0 | 2019-10-03 .. 2020-03-06 | `61734258258c` |
+| E2020 | 2020-21 | 327 | 305 | 22 | 2020-10-01 .. 2021-05-30 | `11ffb91199db` |
+| E2021 | 2021-22 | 299 | 278 | 21 | 2021-09-30 .. 2022-05-21 | `df05070ddc23` |
+| E2022 | 2022-23 | 328 | 306 | 22 | 2022-10-06 .. 2023-05-21 | `2355e5f75b93` |
+| E2023 | 2023-24 | 331 | 306 | 25 | 2023-10-05 .. 2024-05-26 | `bbc85e0d905f` |
+| E2024 | 2024-25 | 330 | 306 | 24 | 2024-10-03 .. 2025-05-25 | `ba262abb470a` |
+| **合计** | | **1867** | 1753 | 114 | | |
 
-**未触碰**：NBA 采集器、NBA 模型（Elo/攻防/Pace/Score）、NBA 参数、NBA 回测结果、任何跨联赛共享（Elo/训练数据/calibration 均按 league 隔离，B3 已建立）。
+**赛季缩短的历史原因（源事实，非我方数据缺口）**
+- 2019-20：2020-03 因 COVID 中止（252 场，无季后赛）。
+- 2020-21：305 场常规赛（1 场取消）。
+- 2021-22：278 场常规赛（俄罗斯俱乐部 2022-02 被移除，赛季结构变更）。
 
-## 2. 真实数据审计结果（EUROLEAGUE，330 场）
+## 2. 数据质量审计（6 季，`basketball league-audit --league EUROLEAGUE`）
 
 ```text
-games: 330 | seasons: 1 | status: PASS
-
-season coverage:
-season        games  regular  other  teams  range
-2024-25         330      306     24     18  2024-10-03 .. 2025-05-25
-
-[PASS] game_id.format      330 ids; format E<yyyy>-<gameCode>
-[PASS] game_id.unique      duplicates: 0
-[PASS] team.namespace      18 team ids; all carry EL- prefix
-[PASS] team.registered     all referenced teams exist
-[PASS] season.boundaries   1 season; overlaps: none; implausible: none
-[PASS] competition.tags    untagged games: 0 of 330
-[PASS] regulation.minutes  expected 200 min/team; OT rows: 24; violations: 0
-[PASS] timezone.aware      all timestamps timezone-aware
-[PASS] missing.games       306/306 regular-season games (schedule reference supplied)
-[PASS] final.consistency   mismatches: 0; non-final: 0
-[PASS] provenance.leakage  sampled 2 (E2024-0329/0330); failures: 0
+games: 1867 | seasons: 6 | status: PASS
+[PASS] game_id.format        E<yyyy>-<gameCode>，全部合规
+[PASS] game_id.unique        0 重复
+[PASS] team.namespace        23 支球队全部 EL- 前缀（含 E2019-E2021 的 CSK/DYR/UNK/KHI）
+[PASS] team.registered       全部在注册表
+[PASS] season.boundaries     6 季，无重叠、无异常跨度
+[PASS] competition.tags      0 未标记（REGULAR_SEASON / PLAY_IN / PLAYOFF）
+[WARN] regulation.minutes    期望 200；加时行 192；10 处源侧聚合瑕疵（195/201/240，原样保留不修补）
+[PASS] timezone.aware        全部 tz-aware（主场本地 tip-off → UTC）
+[WARN] missing.games         无赛程参照（如实标注，未伪造）
+[PASS] final.consistency     0 不一致
+[PASS] provenance.leakage    抽样 3 场 as-of 特征计算，0 泄漏、0 跨联赛历史
 ```
 
-**数据质量细节（实测）**
-- 规制：常规 200 分钟/队（636 行）→ 加时 225（22 行 = 11 场）→ 双加时 250（2 行 = 1 场），无违规值。
-- possessions 均值 72.7/队（40 分钟制，估算口径 `fga+0.44fta-orb+tov`）。
-- competition 拆分：REGULAR_SEASON 306 / PLAY_IN 3 / PLAYOFF 21（窗口回测默认只取常规赛 306）。
-- game_id `E2024-0001 .. E2024-0330`，无重复、无 NBA 风格 id 混入。
-- 全部时间戳 tz-aware（tip-off 本地时间 → UTC，主场时区换算）。
+**源缺陷处理（不修补、不绕过门禁）**
+- `E2020-0127`（Efes vs Milan）：源 `totr.Minutes = 179`（同场 Efes 报 200），低于任何合法节次合计 → 记入
+  `euroleague_live.KNOWN_SOURCE_DEFECTS` **显式排除**（该季入库 327 场而非 328），并在 `_meta["source_excluded"]` 留痕。
+- 其余 10 处（195/201/240 等）在入库门禁 `[180,400]` 内 → **原样入库**；审计按"源侧瑕疵 WARN + 逐条列出"报告，
+  既不静默接受、也不当作不可能值 FAIL。
 
-## 3. 窗口实验结果（冻结默认参数，`--league EUROLEAGUE`，seed=7，100 sims/场）
+**别名表扩展（按源端官方代码，有证据）**：`PAM→VAL`(Valencia)、`CSK`(CSKA)、`DYR`(Zenit)、`UNK`(UNICS)、`KHI`(Khimki)，时区均为 Europe/Moscow 或 Europe/Madrid。
 
-| 窗口 | 评估场次 | 可预测 | random | elo | strength | simulation |
+## 3. 三窗口 Walk-Forward 回测（冻结默认参数，`--league EUROLEAGUE`，seed=7，100 sims/场）
+
+**WINDOW 1 — 1 season（2024-25，306 场，可预测 301）**
+
+| model | acc | logloss | brier | ECE | margin MAE | total MAE |
 |---|---|---|---|---|---|---|
-| 1 season（2024-25） | 306 | 261 | 0.6931 | 0.6381 | 0.6348 | **0.6320** |
-| 3 seasons（2022-25） | 306 | 261 | 0.6931 | 0.6381 | 0.6348 | **0.6320** |
-| all available（↔E2024） | 306 | 261 | 0.6931 | 0.6381 | 0.6348 | **0.6320** |
+| random | 0.6113 | 0.6931 | 0.2500 | 0.1113 | n/a | n/a |
+| **elo** | **0.6545** | **0.6240** | 0.2184 | 0.0596 | n/a | n/a |
+| strength | 0.6312 | 0.6415 | 0.2250 | 0.0600 | 9.46 | 13.53 |
+| simulation | 0.6246 | 0.6304 | 0.2206 | 0.0640 | 9.46 | 13.53 |
 
-**完整指标（三窗口相同，因库内只有 E2024）**
+**WINDOW 2 — 3 seasons（2022-23..2024-25，918 场，可预测 904）**
 
-| model | n | acc | logloss | brier | ece | margin MAE | total MAE |
-|---|---|---|---|---|---|---|---|
-| random | 261 | 0.5977 | 0.6931 | 0.2500 | 0.0977 | n/a | n/a |
-| elo | 261 | **0.6245** | 0.6381 | 0.2247 | 0.0629 | n/a | n/a |
-| strength | 261 | 0.6130 | 0.6348 | 0.2223 | 0.0597 | 9.85 | 12.71 |
-| simulation | 261 | 0.6130 | **0.6320** | 0.2225 | 0.0500 | 9.85 | 12.71 |
+| model | acc | logloss | brier | ECE | margin MAE | total MAE |
+|---|---|---|---|---|---|---|
+| random | 0.6327 | 0.6931 | 0.2500 | 0.1327 | n/a | n/a |
+| **elo** | **0.6825** | **0.6062** | 0.2098 | 0.0507 | n/a | n/a |
+| strength | 0.6670 | 0.6322 | 0.2205 | 0.0860 | 9.30 | 13.25 |
+| simulation | 0.6538 | 0.6218 | 0.2164 | 0.0622 | 9.30 | 13.25 |
 
-**为何 3/all 与 1 季完全相同**：库内 EuroLeague 只有 `E2024` 一个赛季，3 季与 all 窗口在该联赛下解析出的评估集合与 1 季窗口一致（306 场）。这不是"跑通三个窗口"的成绩单，而是**如实暴露数据缺口**——机制可运行，数据未到位。
+**WINDOW 3 — all available（2019-20..2024-25，1753 场，可预测 1685）**
 
-## 4. 模型比较与新发现（不预设结论）
+| model | acc | logloss | brier | ECE | margin MAE | total MAE |
+|---|---|---|---|---|---|---|
+| random | 0.6184 | 0.6931 | 0.2500 | 0.1184 | n/a | n/a |
+| **elo** | **0.6617** | **0.6183** | 0.2150 | 0.0228 | n/a | n/a |
+| strength | 0.6528 | 0.6365 | 0.2226 | 0.0720 | 9.56 | 13.45 |
+| simulation | 0.6386 | 0.6303 | 0.2202 | 0.0541 | 9.56 | 13.45 |
 
-1. **在 EuroLeague 上 Elo 并未优于 strength/simulation**：logloss elo 0.6381 vs strength 0.6348 vs sim 0.6320（与 NBA B2 的结论方向相反）。
-2. **但该差异不构成统计结论**：n=261 时 logloss 的标准误量级约 0.03，而 elo↔sim 差值仅 0.006（<0.25 SE）——**样本量不足以判定排序**。需要 E2019–E2023 才能给出多赛季判断；本阶段不下"EL 中 Elo 更差"的结论。
-3. **accuracy 与 logloss 排序不一致**（elo acc 最高 0.6245，但 logloss/ECE 较差）：Elo 更爱冒险（ECE 0.0629），strength/sim 更保守（ECE 0.050–0.060）。
-4. **simulation ≈ strength**（0.6320 vs 0.6348，MAE 完全相同）：与 NBA 一致——MC 只加噪声不改均值。
-5. **EL 的 total MAE（12.71）明显优于 NBA（15.2–20.3）**，margin MAE（9.85）也更好：40 分钟制 + 较低回合数（72.7/队）使比分分布更窄，天然更易预测。
-6. 全部窗口 leakage/provenance PASS；特征历史严格限定在**同联赛**（跨联赛历史检查为 0 违规）。
+## 4. 关键发现
 
-## 5. 未完成 / 受阻（如实）
+1. **Elo 在全部三个窗口都是最佳预测器**（0.6240 / 0.6062 / 0.6183），与 NBA（B2）结论一致。
+2. **上一轮 B4 的"EL 中 Elo 更差"结论被推翻，原因是历史深度而非联赛特性**：只有 E2024 一季时
+   elo 0.6381 > sim 0.6320；补入 E2019-E2023 后同一赛季窗口变为 elo 0.6240 < sim 0.6304（Elo 反超）。
+   → 结论：**Elo 稳定优于 strength/simulation 的前提是联赛历史足够深**；单季样本会给出相反且不可靠的排序。
+3. **EuroLeague 主场胜率显著更高**：random baseline 的 accuracy = 真实主队胜率 ≈ 0.61-0.63（NBA 为 0.55-0.57）。
+4. **比分预测比 NBA 更准**：margin MAE 9.3-9.6 / total MAE 13.2-13.5（NBA 为 10.0-12.0 / 15.2-20.3），
+   与 40 分钟制、更低回合数（≈72/队）一致。
+5. **simulation ≈ strength 再次成立**（margin/total MAE 完全相同）；sim 的 logloss 略优来自 MC 平滑，非新增信息。
+6. **ECE 随历史加深改善**（Elo 0.0596 → 0.0228），说明校准依赖样本量而非调参。
+7. **未根据结果调整任何参数**（任务 #8）；三窗口均为冻结默认参数。
 
-| 项 | 状态 | 说明 |
-|---|---|---|
-| 接入 E2019–E2023 | ❌ **受阻** | 沙箱无外网；`live.euroleague.net` 实测 UNREACHABLE。抓取器已就绪，需用户侧网络执行 |
-| 多赛季 walk-forward（3/all 真有 3+ 季） | ❌ 受阻 | 依赖上一条 |
-| 参数拟合（`--train-seasons ≥1`） | 未执行 | EL 首季之前无历史赛季可拟合；需 ≥2 季 |
-| 市场基线 | 不可用 | 无免费历史赔率（不伪造） |
-| 其他联赛（ACB/NBL/CBA/BSL） | 未触及 | 按指示不做 |
+## 5. 未完成 / 已知问题
 
-**用户侧恢复步骤（一次命令完成采集，再走既有链路）**：
+| 项 | 状态 |
+|---|---|
+| `--train-seasons ≥1` 训练窗参数拟合 | ⚠️ 已实现但**过慢**：在 306 场训练窗上做 logistic/HCA/k 网格 + λ 扫描，运行 >30 min CPU 未收敛，本轮终止。B2 约定为"拟合参数单独报告、不应用于默认模型"，故不影响上表结论 |
+| 市场基线 | 不可用（无免费历史赔率，不伪造） |
+| 缺失比赛参照 | 无官方赛程源（审计如实 WARN） |
+| 其他联赛（ACB/NBL/CBA/BSL） | 未触及（按指示） |
+| 2019-20/2020-21/2021-22 赛季场次不足 306 | 源历史事实（COVID / 俄俱乐部移除），非数据缺口 |
+
+## 6. 复现命令
 
 ```powershell
-# 1) 抓取（需联网；建议逐个赛季，可 --resume 续传）
+# 采集（用户侧联网；已完成的赛季可用 --resume 跳过）
 python tools/fetch_euroleague_bundle.py --seasons E2019 E2020 E2021 E2022 E2023 `
-    --out-dir C:\lanqiu\storage\raw\euroleague_live --resume
+    --out-dir C:\lanqiu\.tmp\el_fetch --resume --pause 0.5 --checkpoint-every 10
 
-# 2) 校验 + 入库（项目 venv；每个赛季一个 bundle）
-.\.venv\Scripts\python.exe -m basketball_agent.cli.main validate C:\lanqiu\storage\raw\euroleague_live\euroleague_E2023_raw.json
-.\.venv\Scripts\python.exe -m basketball_agent.cli.main ingest   C:\lanqiu\storage\raw\euroleague_live\euroleague_E2023_raw.json
+# 逐季校验 + 入库（各自生成 raw manifest + SHA-256 + processed + snapshot）
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main validate <bundle.json>
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main ingest   <bundle.json> --source euroleague_live --snapshot-tag ingest:E20xx
 
-# 3) 多赛季审计 + 三窗口
-.\.venv\Scripts\python.exe -m basketball_agent.cli.main league-audit --league EUROLEAGUE --expected-regular 306 --leakage-sample 3
+# 审计 + 三窗口
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main league-audit --league EUROLEAGUE --leakage-sample 3
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main window-backtest --league EUROLEAGUE --window-start 2024-10-01T00:00:00+00:00 --window-end 2025-07-01T00:00:00+00:00 --train-seasons 0 --n-simulations 100 --seed 7
 .\.venv\Scripts\python.exe -m basketball_agent.cli.main window-backtest --league EUROLEAGUE --window-start 2022-10-01T00:00:00+00:00 --window-end 2025-07-01T00:00:00+00:00 --train-seasons 0 --n-simulations 100 --seed 7
+.\.venv\Scripts\python.exe -m basketball_agent.cli.main window-backtest --league EUROLEAGUE --window-start 2019-10-01T00:00:00+00:00 --window-end 2025-07-01T00:00:00+00:00 --train-seasons 0 --n-simulations 100 --seed 7
 ```
 
-## 6. 验收对照
+## 7. 验收对照（本轮）
 
-- NBA 原有测试全部通过 → ✅（445 passed / 1 skipped / 0 failed；新增测试未改动 NBA 断言）
-- EuroLeague 多赛季真实数据可追溯 → ⚠️ 单季可追溯（含 manifest/SHA-256/快照）；多季**受阻**
-- 1/3/all 窗口均可运行 → ✅ 机制运行成功（3/all 因数据只有 1 季而与 1 季同集，已如实标注）
-- leakage/provenance PASS → ✅（审计 11/11 PASS；样本场次 as-of 特征计算无未来信息、无跨联赛历史）
-- storage 无污染 → ✅（实验全程使用 `.tmp` 数据库副本；`storage/basketball.db` SHA-256 运行前后一致）
-- git clean → 见提交记录（本轮新增/修改文件已提交）
+- NBA 原有测试全部通过 → ✅（448 passed / 1 skipped / 0 failed）
+- EuroLeague 多赛季真实数据可追溯 → ✅（6 季，raw manifest + SHA-256 + processed + 快照 + `EL-` 命名空间）
+- 1/3/all 窗口均可运行 → ✅（真实 306 / 918 / 1753 场，非退化）
+- leakage/provenance PASS → ✅（审计抽样 0 失败；无跨联赛历史）
+- 不伪造数据 → ✅（1 场源缺陷显式排除而非修补；10 处源瑕疵原样保留并逐条报告）
+- 未调参 / 未新增模型 / 未接其他联赛 → ✅

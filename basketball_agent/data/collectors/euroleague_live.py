@@ -68,7 +68,14 @@ TEAM_TIMEZONES: dict[str, str] = {
     "TEL": "Asia/Jerusalem",    # Maccabi Playtika Tel Aviv
     "ULK": "Europe/Istanbul",   # Fenerbahce Beko Istanbul
     "VIR": "Europe/Rome",       # Virtus Segafredo Bologna
+    "VAL": "Europe/Madrid",     # Valencia Basket (official CodeTeam value is PAM)
     "ZAL": "Europe/Vilnius",    # Zalgiris Kaunas
+    # seasons E2019-E2021 only (Russian clubs were excluded from 2022-23 on);
+    # canonical ids are the official CodeTeam values observed in those bundles
+    "CSK": "Europe/Moscow",     # CSKA Moscow
+    "DYR": "Europe/Moscow",     # Zenit St Petersburg
+    "UNK": "Europe/Moscow",     # UNICS Kazan
+    "KHI": "Europe/Moscow",     # Khimki Moscow Region (E2019-E2020 only)
 }
 
 # every known spelling (codes, TV codes, name variants) -> canonical id
@@ -85,7 +92,7 @@ for _canon, _aliases in {
     "BAR": ("fcb", "barcelona", "fc barcelona", "fc barcelona lassa"),
     "BAS": ("baskonia", "baskonia vitoria-gasteiz", "baskonia alaves",
             "saski baskonia"),
-    "VAL": ("vbc", "valencia", "valencia basket"),
+    "VAL": ("pam", "vbc", "valencia", "valencia basket"),
     "ULK": ("fen", "fbb", "fenerbahce", "fenerbahce beko istanbul",
             "fenerbahce ulker istanbul"),
     "IST": ("efes", "efs", "anadolu efes", "anadolu efes istanbul"),
@@ -102,9 +109,25 @@ for _canon, _aliases in {
     "VIR": ("bol", "virtus", "virtus bologna", "virtus segafredo bologna"),
     "MIL": ("eam", "ax milan", "olimpija milan", "milan",
             "ea7 emporio armani milan", "emporio armani milan"),
+    "CSK": ("cska", "cska moscow"),
+    "DYR": ("zen", "zenit", "zenit st petersburg", "zenit saint petersburg"),
+    "UNK": ("uni", "unics", "unics kazan"),
+    "KHI": ("khimki", "khimki moscow region", "khimki moskva", "bck himki"),
 }.items():
     for _alias in _aliases:
         ALIAS_TO_TEAM.setdefault(_alias, _canon)
+
+
+#: Source-data defects that make a game unusable WITHOUT repairing it.
+#: Excluded games are skipped and reported in ``_meta["source_excluded"]`` —
+#: the source value is never edited, and the validator is never loosened.
+#: ``E2020-0127``: the source reports ``totr.Minutes = 179`` for AX ARMANI
+#: MILAN (Efes reports 200 in the same game) — below any legal regulation or
+#: overtime value, so the box score is broken at the source.
+KNOWN_SOURCE_DEFECTS: dict[str, str] = {
+    "E2020-0127": "source totr.Minutes=179 for AX ARMANI MILAN (impossible); "
+                  "game excluded, value not repaired",
+}
 
 
 class EuroLeagueDataError(RuntimeError):
@@ -241,11 +264,17 @@ def parse_euroleague_bundle(bundle: dict) -> dict:
     teams: dict[str, Team] = {}
     estimated = 0
     postponed = 0
+    excluded: list[tuple[str, str]] = []
 
     for key in sorted(headers, key=int):
         header = headers[key]
         code = int(key)
         game_id = f"{season_code}-{code:04d}"
+
+        defect_reason = KNOWN_SOURCE_DEFECTS.get(game_id)
+        if defect_reason is not None:
+            excluded.append((game_id, defect_reason))
+            continue
 
         phase = str(header.get("Phase", "")).strip().upper()
         competition_raw = PHASE_TO_COMPETITION.get(phase)
@@ -341,6 +370,7 @@ def parse_euroleague_bundle(bundle: dict) -> dict:
             "n_postponed": postponed,
             "possessions_estimated_for": estimated,
             "season_code": season_code,
+            "source_excluded": [{"game_id": gid, "reason": reason} for gid, reason in excluded],
         },
     }
 

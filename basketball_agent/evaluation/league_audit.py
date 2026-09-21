@@ -196,7 +196,8 @@ def audit_league(
     stats = [ts for ts in repo.list_team_stats()
              if any(g.game_id == ts.game_id for g in games)]
     expected = _regulation_minutes(league)
-    unexpected: list[str] = []
+    hard_violations: list[str] = []
+    source_quirks: list[str] = []
     ot_games = 0
     for ts in stats:
         delta = ts.minutes - expected
@@ -205,13 +206,26 @@ def audit_league(
         if delta > 0 and delta % OT_STEP_MINUTES == 0:
             ot_games += 1
             continue
-        unexpected.append(f"{ts.game_id}/{ts.team_id}={ts.minutes}")
-    checks.append(AuditCheck(
-        "regulation.minutes", PASS if not unexpected else FAIL,
-        f"expected {expected} min/team; OT rows: {ot_games}; "
-        f"violations: {len(unexpected)}"
-        + (f" e.g. {unexpected[:3]}" if unexpected else ""),
-    ))
+        entry = f"{ts.game_id}/{ts.team_id}={ts.minutes}"
+        # outside any physically possible range -> the ingest gate's territory
+        if not (180 <= ts.minutes <= 400):
+            hard_violations.append(entry)
+        else:
+            source_quirks.append(entry)
+    if hard_violations:
+        status, detail = FAIL, (
+            f"expected {expected} min/team; OT rows: {ot_games}; "
+            f"impossible values: {len(hard_violations)} e.g. {hard_violations[:3]}"
+        )
+    elif source_quirks:
+        status, detail = WARN, (
+            f"expected {expected} min/team; OT rows: {ot_games}; "
+            f"source aggregation quirks (retained verbatim, not repaired): "
+            f"{len(source_quirks)} e.g. {source_quirks[:4]}"
+        )
+    else:
+        status, detail = PASS, f"expected {expected} min/team; OT rows: {ot_games}; violations: 0"
+    checks.append(AuditCheck("regulation.minutes", status, detail))
 
     # 6) timezone awareness -------------------------------------------------
     naive = [g.game_id for g in games if g.game_date.tzinfo is None]

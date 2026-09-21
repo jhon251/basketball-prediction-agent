@@ -48,8 +48,13 @@ DEFAULT_TRAILING_EMPTY_STOP = 40
 USER_AGENT = "Mozilla/5.0 (compatible; basketball-agent/0.1; research)"
 
 
-def fetch_json(url: str, *, timeout: float = 30.0, retries: int = 3, backoff: float = 2.0):
-    """GET one endpoint with bounded retries. Raises FetchError on failure."""
+def fetch_json(url: str, *, timeout: float = 30.0, retries: int = 5, backoff: float = 2.0):
+    """GET one endpoint with bounded retries.
+
+    HTTP 429 (rate limit) is handled explicitly: the wait honours
+    ``Retry-After`` when present and otherwise grows with the attempt number.
+    Raises FetchError on failure.
+    """
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -57,6 +62,17 @@ def fetch_json(url: str, *, timeout: float = 30.0, retries: int = 3, backoff: fl
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 payload = response.read().decode("utf-8", errors="replace")
             return json.loads(payload) if payload.strip() else None
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if attempt < retries:
+                if exc.code == 429:
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    wait = float(retry_after) if (retry_after or "").strip().isdigit() else backoff * 10 * attempt
+                    wait = min(max(wait, 10.0), 120.0)
+                    print(f"  rate limited (429); sleeping {wait:.0f}s", file=sys.stderr)
+                    time.sleep(wait)
+                else:
+                    time.sleep(backoff * attempt)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last_error = exc
             if attempt < retries:
@@ -101,14 +117,25 @@ def fetch_season(
     max_game_code: int = DEFAULT_MAX_GAME_CODE,
     trailing_empty_stop: int = DEFAULT_TRAILING_EMPTY_STOP,
     existing: dict | None = None,
-    request_pause: float = 0.0,
+    request_pause: float = 0.5,
     verbose: bool = True,
+    checkpoint=None,
+    checkpoint_every: int = 10,
 ) -> dict:
-    """Fetch one season's headers + boxscores (network required)."""
+    """Fetch one season's headers + boxscores (network required).
+
+    ``checkpoint`` is called with the current bundle every
+    ``checkpoint_every`` fetched games so a mid-season interruption can be
+    resumed with ``--resume`` instead of losing all progress.
+    """
     headers: dict[str, dict] = dict((existing or {}).get("headers") or {})
     boxscores: dict[str, dict] = dict((existing or {}).get("boxscores") or {})
     empty_codes: list[int] = list((existing or {}).get("empty_game_codes") or [])
     trailing_empty = 0
+    fetched_since_checkpoint = 0
+
+    def current() -> dict:
+        return build_bundle(season_code, headers, boxscores, empty_game_codes=empty_codes)
 
     for code in range(1, max_game_code + 1):
         key = str(code)
@@ -131,13 +158,17 @@ def fetch_season(
         )
         if isinstance(boxscore, dict):
             boxscores[key] = boxscore
+        fetched_since_checkpoint += 1
+        if checkpoint is not None and fetched_since_checkpoint >= checkpoint_every:
+            checkpoint(current())
+            fetched_since_checkpoint = 0
         if verbose and code % 25 == 0:
             print(f"  {season_code}: {len(headers)} games fetched (gameCode={code})",
                   file=sys.stderr)
         if request_pause:
             time.sleep(request_pause)
 
-    return build_bundle(season_code, headers, boxscores, empty_game_codes=empty_codes)
+    return current()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,14 +177,37 @@ def main(argv: list[str] | None = None) -> int:
                         help="season codes, e.g. E2019 E2020 E2021 E2022 E2023")
     parser.add_argument("--out-dir", required=True, help="output directory for raw bundles")
     parser.add_argument("--max-game-code", type=int, default=DEFAULT_MAX_GAME_CODE)
-    parser.add_argument("--pause", type=float, default=0.2,
-                        help="pause between games in seconds (be polite)")
+    parser.add_argument("--pause", type=float, default=0.5,
+                        help="pause between games in seconds (be polite; the endpoint "
+                             "rate-limits aggressive clients with HTTP 429)")
     parser.add_argument("--resume", action="store_true",
                         help="continue from an existing bundle file if present")
+    parser.add_argument("--checkpoint-every", type=int, default=10,
+                        help="write the partial bundle every N fetched games so --resume "
+                             "can continue after an interruption")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_bundle(target: Path, bundle: dict) -> None:
+        """Atomic write: temp file + replace.
+
+        The replace is retried briefly: on Windows a concurrent reader
+        (e.g. an ingest of the previous checkpoint) can hold the target file
+        for a moment.  Run ONE fetcher per season to avoid collisions.
+        """
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
+        last_error: Exception | None = None
+        for attempt in range(4):
+            try:
+                tmp.replace(target)
+                return
+            except PermissionError as exc:  # file briefly locked by another process
+                last_error = exc
+                time.sleep(0.5 * (attempt + 1))
+        raise FetchError(f"could not write {target}: {last_error}")
 
     exit_code = 0
     for season in args.seasons:
@@ -168,14 +222,16 @@ def main(argv: list[str] | None = None) -> int:
             bundle = fetch_season(
                 season, max_game_code=args.max_game_code,
                 existing=existing, request_pause=args.pause,
+                checkpoint=lambda b: write_bundle(target, b),
+                checkpoint_every=args.checkpoint_every,
             )
         except FetchError as exc:
             print(f"{season}: FETCH FAILED — {exc}", file=sys.stderr)
-            print("  (partial progress is kept in memory only; re-run with --resume after "
-                  "a successful write)", file=sys.stderr)
+            print(f"  partial progress was checkpointed to {target.name}; "
+                  f"re-run with --resume to continue", file=sys.stderr)
             exit_code = 1
             continue
-        target.write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
+        write_bundle(target, bundle)
         print(f"{season}: wrote {target} "
               f"(headers={bundle['n_headers']}, boxscores={bundle['n_boxscores']}, "
               f"empty={len(bundle['empty_game_codes'])})", file=sys.stderr)

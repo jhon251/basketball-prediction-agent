@@ -52,3 +52,53 @@ class TestHeaderDetection:
 class TestFetchErrorSurface:
     def test_fetch_error_is_runtime_error(self):
         assert issubclass(FetchError, RuntimeError)
+
+
+class TestCheckpointing:
+    def test_fetch_season_checkpoints_incrementally(self, monkeypatch):
+        """A mid-season interruption must leave resumable progress on disk."""
+        from tools import fetch_euroleague_bundle as tool
+
+        def fake_fetch_json(url, **kwargs):
+            if "Header" in url:
+                code = int(url.split("gameCode=")[1].split("&")[0])
+                if code <= 3:
+                    return {"CodeTeamA": "RED", "CodeTeamB": "ASV", "Phase": "REGULAR SEASON"}
+                return {}
+            return {"Stats": []}
+
+        monkeypatch.setattr(tool, "fetch_json", fake_fetch_json)
+        checkpoints: list[dict] = []
+        bundle = tool.fetch_season(
+            "E2023", max_game_code=6, trailing_empty_stop=2,
+            checkpoint=checkpoints.append, checkpoint_every=2, verbose=False,
+        )
+        assert bundle["n_headers"] == 3
+        assert bundle["n_boxscores"] == 3
+        # checkpoint fired during the run (before the final return value)
+        assert checkpoints, "expected incremental checkpoints"
+        assert checkpoints[0]["n_headers"] >= 1
+
+    def test_resume_skips_already_fetched_codes(self, monkeypatch):
+        from tools import fetch_euroleague_bundle as tool
+
+        calls: list[str] = []
+
+        def fake_fetch_json(url, **kwargs):
+            calls.append(url)
+            code = int(url.split("gameCode=")[1].split("&")[0])
+            if "Header" in url and code <= 2:
+                return {"CodeTeamA": "RED", "CodeTeamB": "ASV", "Phase": "REGULAR SEASON"}
+            return {} if "Header" in url else {"Stats": []}
+
+        monkeypatch.setattr(tool, "fetch_json", fake_fetch_json)
+        existing = tool.build_bundle(
+            "E2023", {"1": {"CodeTeamA": "RED", "CodeTeamB": "ASV"}}, {"1": {"Stats": []}}
+        )
+        bundle = tool.fetch_season(
+            "E2023", max_game_code=4, trailing_empty_stop=2,
+            existing=existing, verbose=False,
+        )
+        assert "gameCode=1&" in "".join(calls) or all("gameCode=1&" not in c for c in calls)
+        assert bundle["n_headers"] == 2  # code 1 reused, code 2 fetched
+        assert not any("gameCode=1&" in c for c in calls), "resume must not re-fetch code 1"

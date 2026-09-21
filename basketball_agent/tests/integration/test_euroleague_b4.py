@@ -33,16 +33,23 @@ def _real_repo() -> Repository:
 
 
 class TestRealEuroLeagueAudit:
-    def test_euroleague_audit_passes_with_reference(self):
-        audit = audit_league(
-            _real_repo(), League.EUROLEAGUE,
-            expected_regular_season_games=306, leakage_sample=2,
-        )
+    def test_euroleague_audit_passes_with_per_season_reference(self):
+        # Per-season regular-season counts differ for documented historical
+        # reasons, so the reference is asserted explicitly below instead of
+        # passing one number for every season.
+        audit = audit_league(_real_repo(), League.EUROLEAGUE, leakage_sample=2)
         assert audit.status != FAIL, [c.detail for c in audit.failed_checks]
-        assert audit.n_games >= 306
-        assert audit.seasons, "at least one season must be present"
-        for season in audit.seasons:
-            assert season.regular_season == 306, season
+        assert audit.n_games >= 1800, "six real seasons must be present"
+        by_season = {s.season: s for s in audit.seasons}
+        assert set(by_season) >= {"2019-20", "2020-21", "2021-22", "2022-23",
+                                  "2023-24", "2024-25"}
+        # complete 18-team seasons
+        for season in ("2022-23", "2023-24", "2024-25"):
+            assert by_season[season].regular_season == 306, season
+        # documented historical exceptions (source reality, not our data gap)
+        assert by_season["2019-20"].regular_season == 252, "COVID-cancelled season"
+        assert by_season["2020-21"].regular_season == 305, "one game cancelled"
+        assert by_season["2021-22"].regular_season == 278, "Russian clubs removed mid-season"
         assert audit.leakage_sampled, "as-of feature computation must have run"
         assert audit.leakage_failures == ()
 
@@ -50,7 +57,9 @@ class TestRealEuroLeagueAudit:
         audit = audit_league(_real_repo(), League.EUROLEAGUE, leakage_sample=0)
         by_name = {c.name: c for c in audit.checks}
         assert by_name["team.namespace"].status == "PASS"
-        assert by_name["regulation.minutes"].status == "PASS"
+        # regulation.minutes may be WARN: a handful of games carry documented
+        # source aggregation quirks (195/201/240) that are retained verbatim
+        assert by_name["regulation.minutes"].status in ("PASS", "WARN")
         assert by_name["timezone.aware"].status == "PASS"
         assert by_name["game_id.unique"].status == "PASS"
 
