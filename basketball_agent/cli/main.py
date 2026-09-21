@@ -174,6 +174,16 @@ def _build_parser() -> argparse.ArgumentParser:
     rep.add_argument("--seed", type=int, default=7)
     rep.add_argument("--warmup", type=int, default=5)
 
+    la = sub.add_parser("league-audit",
+                        help="audit ONE league's data (ids/namespace/seasons/competition/"
+                             "regulation/timezone/missing/FINAL/leakage) — read-only")
+    la.add_argument("--league", default="EUROLEAGUE", choices=["NBA", "EUROLEAGUE"])
+    la.add_argument("--leakage-sample", type=int, default=3,
+                    help="how many as-of feature computations to audit (0 disables)")
+    la.add_argument("--expected-regular", type=int, default=None,
+                    help="expected regular-season games per season (e.g. 306 for EuroLeague; "
+                         "omit when no schedule reference is available)")
+
     return parser
 
 
@@ -231,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_experiments(args)
     if args.command == "window-backtest":
         return _cmd_window_backtest(args)
+    if args.command == "league-audit":
+        return _cmd_league_audit(args)
     if args.command == "report":
         return _cmd_report(args)
 
@@ -519,6 +531,25 @@ def _cmd_window_backtest(args) -> int:
               f"{_fmt(metrics['brier_score']):>8}{_fmt(metrics['ece']):>8}"
               f"{_fmt(metrics['margin_mae']):>12}{_fmt(metrics['total_mae']):>11}")
     return 0
+
+
+def _cmd_league_audit(args) -> int:
+    from basketball_agent.data.schemas.base import League
+    from basketball_agent.evaluation.league_audit import audit_league, format_audit
+
+    try:
+        db, _ = _open_db()
+        audit = audit_league(
+            Repository(db),
+            League(args.league),
+            expected_regular_season_games=args.expected_regular,
+            leakage_sample=args.leakage_sample,
+        )
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(format_audit(audit))
+    return 0 if audit.status == "PASS" else 1
 
 
 def _fmt(value):
