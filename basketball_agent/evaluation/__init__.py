@@ -19,6 +19,12 @@ from basketball_agent.evaluation.calibration import (
     build_reliability_table,
     expected_calibration_error,
 )
+from basketball_agent.evaluation.fitting import (
+    FeatureRecord,
+    FittingDataset,
+    SkippedGame,
+    build_fitting_dataset,
+)
 from basketball_agent.evaluation.leakage import (
     LeakageReport,
     check_temporal_integrity,
@@ -33,6 +39,8 @@ __all__ = [
     "BacktestRecord",
     "BacktestResult",
     "EloPredictor",
+    "FeatureRecord",
+    "FittingDataset",
     "HistoricalPredictor",
     "LeakageReport",
     "Prediction",
@@ -40,11 +48,13 @@ __all__ = [
     "RandomPredictor",
     "ReliabilityBin",
     "SimulationPredictor",
+    "SkippedGame",
     "StrengthPredictor",
     "SettledPrediction",
     "SettlementStore",
     "accuracy",
     "brier_score",
+    "build_fitting_dataset",
     "build_reliability_table",
     "check_temporal_integrity",
     "expected_calibration_error",

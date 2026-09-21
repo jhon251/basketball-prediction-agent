@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import GameStatus
@@ -31,6 +31,9 @@ from basketball_agent.models.offensive_model import OffensiveModel
 from basketball_agent.models.pace_model import PaceModel
 from basketball_agent.models.win_probability import WinProbabilityConfig, WinProbabilityModel
 from basketball_agent.simulation.monte_carlo import MonteCarloRunner
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids an import cycle
+    from basketball_agent.evaluation.fitting import FittingDataset
 
 
 @dataclass(frozen=True)
@@ -327,6 +330,7 @@ def sweep_decay_lambda(
     warmup_games: int = 5,
     seed: int = 7,
     game_ids: list[str] | None = None,
+    datasets: dict[float, "FittingDataset"] | None = None,
 ) -> dict[float, dict]:
     """Grid-search the time-decay lambda by walk-forward backtest.
 
@@ -335,9 +339,24 @@ def sweep_decay_lambda(
     protocol over ``game_ids`` (all FINAL games when None); the caller picks
     the best value from the returned summaries (and should prefer
     out-of-sample stability over tiny gains).
+
+    Phase 8-B5: ``datasets`` optionally supplies a pre-built (already
+    walk-forward, already league-scoped) feature dataset per lambda; the
+    candidate is then scored on that cache instead of re-running the feature
+    pass.  A cached dataset computes identical features for identical inputs,
+    so the returned summaries are unchanged — only the repeated work is gone.
     """
     outcomes: dict[float, dict] = {}
+    cached_map = datasets or {}
     for lam in lambdas:
+        cached = cached_map.get(lam)
+        if cached is not None:
+            outcomes[lam] = cached.metrics(
+                predictor
+                if predictor is not None
+                else SimulationPredictor(n_simulations=n_simulations, seed=seed)
+            )
+            continue
         engine = BacktestEngine(
             repo,
             predictor or SimulationPredictor(n_simulations=n_simulations, seed=seed),

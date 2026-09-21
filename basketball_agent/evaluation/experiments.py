@@ -326,6 +326,12 @@ def run_window_backtest(
     window immediately BEFORE ``window_start`` and is reported separately —
     never used to change model defaults.
     """
+    if league is not None and not isinstance(league, League):
+        # Phase 8-B5: a bare string (e.g. "EUROLEAGUE") used to match no rows
+        # and silently report an empty window; convert explicitly so a typo
+        # fails loudly instead of looking like "no games to evaluate".
+        league = League(league)
+
     games = [
         g for g in repo.list_games(
             status=GameStatus.FINAL,
@@ -404,6 +410,7 @@ def run_window_backtest(
         fitted = fit_v1_params(
             repo, window_start, train_start=train_start,
             n_simulations=min(n_simulations, 150), seed=seed, warmup_games=warmup_games,
+            league=league,
         )
 
     return {
