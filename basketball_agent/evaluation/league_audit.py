@@ -32,14 +32,17 @@ WARN = "WARN"
 REGULATION_TEAM_MINUTES = {
     League.NBA: 240,          # 4 x 12
     League.EUROLEAGUE: 200,   # 4 x 10
+    League.ACB: 200,          # 4 x 10 (Phase 8-B6)
     League.G_LEAGUE: 240,
     League.CBA: 200,
     League.EUROLEAGUE.value: 200,
     League.NBA.value: 240,
+    League.ACB.value: 200,
 }
 OT_STEP_MINUTES = 25  # 5-minute overtime in both regulations modelled here
 
 EUROLEAGUE_ID_RE = re.compile(r"^E\d{4}-\d{4}$")
+ACB_ID_RE = re.compile(r"^ACB\d{4}-\d{6}$")
 SEASON_LABEL_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
@@ -126,11 +129,19 @@ def audit_league(
             f"{len(ids)} ids; format E<yyyy>-<gameCode>"
             + (f"; offenders: {bad_format[:5]}" if bad_format else ""),
         ))
-    else:
-        bad_format = [gid for gid in ids if EUROLEAGUE_ID_RE.match(gid)]
+    elif league is League.ACB:
+        bad_format = [gid for gid in ids if not ACB_ID_RE.match(gid)]
         checks.append(AuditCheck(
             "game_id.format", PASS if not bad_format else FAIL,
-            f"{len(ids)} ids; EuroLeague-style ids must not appear in {league.value}"
+            f"{len(ids)} ids; format ACB<seasonStartYear>-<matchId>"
+            + (f"; offenders: {bad_format[:5]}" if bad_format else ""),
+        ))
+    else:
+        bad_format = [gid for gid in ids
+                      if EUROLEAGUE_ID_RE.match(gid) or ACB_ID_RE.match(gid)]
+        checks.append(AuditCheck(
+            "game_id.format", PASS if not bad_format else FAIL,
+            f"{len(ids)} ids; EuroLeague/ACB-style ids must not appear in {league.value}"
             + (f"; offenders: {bad_format[:5]}" if bad_format else ""),
         ))
     duplicates = len(ids) - len(set(ids))
@@ -148,12 +159,20 @@ def audit_league(
             f"{len(team_ids)} team ids; all must carry the EL- prefix"
             + (f"; offenders: {wrong[:5]}" if wrong else ""),
         ))
-    else:
-        el_leak = sorted(t for t in team_ids if t.startswith("EL-"))
+    elif league is League.ACB:
+        wrong = sorted(t for t in team_ids if not t.startswith("ACB-"))
         checks.append(AuditCheck(
-            "team.namespace", PASS if not el_leak else FAIL,
-            f"{len(team_ids)} team ids; no EL- ids allowed in {league.value}"
-            + (f"; offenders: {el_leak[:5]}" if el_leak else ""),
+            "team.namespace", PASS if not wrong else FAIL,
+            f"{len(team_ids)} team ids; all must carry the ACB- prefix"
+            + (f"; offenders: {wrong[:5]}" if wrong else ""),
+        ))
+    else:
+        foreign = sorted(t for t in team_ids
+                         if t.startswith("EL-") or t.startswith("ACB-"))
+        checks.append(AuditCheck(
+            "team.namespace", PASS if not foreign else FAIL,
+            f"{len(team_ids)} team ids; no EL-/ACB- ids allowed in {league.value}"
+            + (f"; offenders: {foreign[:5]}" if foreign else ""),
         ))
     unregistered = sorted(t for t in team_ids if repo.get_team(t) is None)
     checks.append(AuditCheck(

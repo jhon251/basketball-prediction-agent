@@ -160,7 +160,7 @@ def _build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--train-seasons", type=int, default=1,
                     help="fit window before the evaluation window, in NBA seasons "
                          "(1/3/5; 0 skips fitting)")
-    wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE"],
+    wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE", "ACB"],
                     help="restrict the evaluation window to one league (default: all)")
     wb.add_argument("--n-simulations", type=int, default=100)
     wb.add_argument("--seed", type=int, default=7)
@@ -177,7 +177,8 @@ def _build_parser() -> argparse.ArgumentParser:
     la = sub.add_parser("league-audit",
                         help="audit ONE league's data (ids/namespace/seasons/competition/"
                              "regulation/timezone/missing/FINAL/leakage) — read-only")
-    la.add_argument("--league", default="EUROLEAGUE", choices=["NBA", "EUROLEAGUE"])
+    la.add_argument("--league", default="EUROLEAGUE",
+                    choices=["NBA", "EUROLEAGUE", "ACB"])
     la.add_argument("--leakage-sample", type=int, default=3,
                     help="how many as-of feature computations to audit (0 disables)")
     la.add_argument("--expected-regular", type=int, default=None,
@@ -195,15 +196,35 @@ def _open_db():
 
 
 def _load_any_games_file(path: str, season: str | None = None) -> dict:
-    """Format dispatch for ingest/validate: .json bundles are EuroLeague
-    live-API raw bundles; everything else goes through the NBA loaders."""
+    """Format dispatch for ingest/validate.
+
+    ``.json`` bundles are raw source bundles and are dispatched on their
+    ``dataset`` marker (``euroleague-live-v1`` / ``acb-api-v1``); anything
+    else goes through the NBA loaders.
+    """
     from pathlib import Path as _Path
 
     if _Path(path).suffix.lower() == ".json":
+        import re as _re
+
+        from basketball_agent.data.collectors.acb_api import (
+            DATASET_MARKER as ACB_MARKER,
+        )
+        from basketball_agent.data.collectors.acb_api import load_acb_bundle_file
         from basketball_agent.data.collectors.euroleague_live import (
             load_euroleague_bundle_file,
         )
 
+        # peek at the marker without loading the whole (potentially huge) bundle
+        try:
+            with _Path(path).open(encoding="utf-8", errors="replace") as handle:
+                head = handle.read(4096)
+            match = _re.search(r'"dataset"\s*:\s*"([^"]+)"', head)
+            marker = match.group(1) if match else None
+        except OSError:
+            marker = None
+        if marker == ACB_MARKER:
+            return load_acb_bundle_file(path)
         return load_euroleague_bundle_file(path)
     from basketball_agent.data.collectors.nba_parquet import load_nba_games_file
 

@@ -9,6 +9,7 @@ class League(str, Enum):
     G_LEAGUE = "G_LEAGUE"
     CBA = "CBA"
     EUROLEAGUE = "EUROLEAGUE"
+    ACB = "ACB"          # Liga Endesa (Spain) — Phase 8-B6
     OTHER = "OTHER"
 
 

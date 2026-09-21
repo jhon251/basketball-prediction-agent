@@ -75,13 +75,20 @@ live 端点失效 → euroleague_api 包跟随官方改版 → Kaggle 历史 dum
 
 ## 3. ACB（西班牙 Liga Endesa）
 
-### 主源：acb.com 官方统计页 ⛔ 未逐页实测（站点确认存在）
-- 官方每场 box score + 近年 PBP；反爬与页面结构需用户侧 devtools 确认。**这是唯一提供当代 ACB 完整 box 的官方渠道**。
+### 主源：`api2.acb.com` 官方数据 API ✅ **实测并已接入（Phase 8-B6）**
+- 端点为 `acb.com` / `live.acb.com` 站点自身调用的 JSON API：
+  - `/api/seasondata/Calendar/season-calendar[?competitionId=&editionId=]` → 竞赛列表（Liga Endesa=1、Copa del Rey=2、Supercopa=3、Minicopa=10）、全部 edition（48=1983-84 … 91=2026-27）、某赛季全部轮次与比赛（`rounds[].matches[]`：matchId、主客 teamId、比分、UTC `startDateTime`、`matchStatus`、`subphaseId`）
+  - `/api/matchdata/MatchHeader/match-header?matchId=` → 主客球队、比分、`quarterScores`（加时判定用）
+  - `/api/matchdata/Result/boxscores?matchId=` → `teamBoxscores[].statsByPeriods`（period 0 = 官方全场球队合计 `stats.total` + 非球员行 `stats.team` + 球员行含 `playTime`）
+- 鉴权：站点自带的公开客户端 `X-APIKEY`（见 `live.acb.com` 自身 JS bundle；非机密）。**实测可用**：6 个赛季 edition 可枚举，2025-26 全季 327 场（含季后赛）全部取到 header + 完整 boxscore。
+- 采集工具：`tools/fetch_acb_bundle.py`（礼貌暂停 + 429 退避 + checkpoint/resume）。适配器：`basketball_agent/data/collectors/acb_api.py`。
+- 注意：官方 HTML 站点为 Next.js 渲染，直接抓 HTML 不必要；该 JSON API 是同一站点的数据层。
 
 ### 备源 A：Basketball-Reference 国际板块 🟡 交叉确认（本次直接抓取被 403 反爬，页面确认存在）
 - `basketball-reference.com/international/spain/`：赛季、球队、球员统计与比赛结果；历史深度为六联赛国际源中最规整。礼貌抓取（低频+UA）通常可行。
+- Phase 8-B6 实测：Python urllib 直连被 Cloudflare 拦（403 Just a moment）；RealGM / eurobasket.com 同样 403。
 
-### 备源 B：RealGM Spanish ACB ✅ 实测（导航确认）
+### 备源 B：RealGM Spanish ACB ⛔ 本次实测 403（Cloudflare）
 ### 历史数据集（免爬取，优先用）✅ 交叉确认
 - Kaggle `jgonzalezferrer/acb-spanish-basketball-league-results`：**1994-2016** 全部比赛 + 同名 GitHub SQLite 工程
 - Zenodo 数据集：**1983-84 至 2022-23** 球队与球员（球员表 10,742 行 × 37 列）
@@ -92,7 +99,7 @@ live 端点失效 → euroleague_api 包跟随官方改版 → Kaggle 历史 dum
 SkillCorner/opendata-basketball：**10 场 ACB 比赛的广播 tracking 开放数据**（2025-26 赛季）——tracking 能力唯一实测可得的样例，仅作研究样例，不进预测管线。
 
 ### 降级方案
-acb.com 反爬过强 → Basketball-Reference → RealGM → Kaggle/Zenodo 历史集补旧赛季。
+`api2.acb.com` 不可用（Key 轮换/下线）→ Basketball-Reference → RealGM → Kaggle/Zenodo 历史集补旧赛季。
 
 ---
 
