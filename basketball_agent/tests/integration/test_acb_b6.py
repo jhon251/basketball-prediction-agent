@@ -1,13 +1,14 @@
-"""B6 integration: real ACB (Liga Endesa) data, audit, windows and isolation.
+"""ACB real-data integration (Phase 8-B6 single season, extended in B7).
 
 These tests need the real snapshot DB (``storage/basketball.db``) with the ACB
-season ingested; they SKIP cleanly when it is absent so the suite stays green
+seasons ingested; they SKIP cleanly when it is absent so the suite stays green
 on a clean checkout.  They are read-only: nothing is written back into
 ``storage/``.
 
-The real-data golden assertions parse the archived raw bundle when it is
-present, so the adapter is checked against the *untrimmed* source payload as
-well as the compact unit fixture.
+B7 added five more complete seasons (2020-21 .. 2024-25), so the expectations
+below cover the full six-season ACB history.  Per-season regular-season counts
+differ (2020-21 had 19 clubs / 38 rounds), which is why the audit is given a
+per-season schedule reference.
 """
 from __future__ import annotations
 
@@ -26,12 +27,23 @@ from basketball_agent.evaluation.league_audit import FAIL, audit_league
 pytestmark = pytest.mark.integration
 
 UTC = timezone.utc
-ACB_SEASON = "2025-26"
+#: season -> (all games, regular-season games, playoff games) from the source calendars
+#: 2021-22 is 326 (not 327): ACB2021-102902 is a documented source defect
+#: (BUR playTime over-count) excluded without repair -> 305 regular, not 306.
+ACB_SEASONS: dict[str, tuple[int, int, int]] = {
+    "2020-21": (360, 342, 18),   # 19 clubs, 38 rounds (COVID-era longer season)
+    "2021-22": (326, 305, 21),
+    "2022-23": (325, 306, 19),
+    "2023-24": (326, 306, 20),
+    "2024-25": (325, 306, 19),
+    "2025-26": (327, 306, 21),
+}
+ACB_TOTAL_GAMES = sum(v[0] for v in ACB_SEASONS.values())          # 1989
+ACB_REGULAR_GAMES = sum(v[1] for v in ACB_SEASONS.values())        # 1871
+ACB_PLAYOFF_GAMES = sum(v[2] for v in ACB_SEASONS.values())        # 118
+ACB_DISTINCT_CLUBS = 25   # union of the six seasons' club registries
 ACB_WINDOW_START = datetime(2025, 10, 1, tzinfo=UTC)
 ACB_WINDOW_END = datetime(2026, 7, 1, tzinfo=UTC)
-REGULAR_SEASON_GAMES = 306      # 18 teams x 34 rounds / 2
-PLAYOFF_GAMES = 21              # QF 11 + SF 6 + Final 4 (real 2025-26 structure)
-TOTAL_GAMES = REGULAR_SEASON_GAMES + PLAYOFF_GAMES
 
 
 def _real_repo() -> Repository:
@@ -49,21 +61,21 @@ def _acb_games(repo: Repository) -> list:
 
 
 class TestRealACBAudit:
-    def test_acb_audit_passes_with_schedule_reference(self):
+    def test_acb_audit_passes_with_per_season_reference(self):
         repo = _real_repo()
         _acb_games(repo)
         audit = audit_league(
             repo, League.ACB, leakage_sample=2,
-            expected_regular_season_games=REGULAR_SEASON_GAMES,
+            expected_regular_by_season={s: v[1] for s, v in ACB_SEASONS.items()},
         )
         assert audit.status != FAIL, [c.detail for c in audit.failed_checks]
-        assert audit.n_games == TOTAL_GAMES
+        assert audit.n_games == ACB_TOTAL_GAMES
         by_season = {s.season: s for s in audit.seasons}
-        assert ACB_SEASON in by_season
-        season = by_season[ACB_SEASON]
-        assert season.regular_season == REGULAR_SEASON_GAMES
-        assert season.other_competitions == PLAYOFF_GAMES
-        assert season.teams == 18
+        assert set(by_season) == set(ACB_SEASONS)
+        for season, (total, regular, playoff) in ACB_SEASONS.items():
+            assert by_season[season].games == total, season
+            assert by_season[season].regular_season == regular, season
+            assert by_season[season].other_competitions == playoff, season
         assert audit.leakage_sampled, "as-of feature computation must have run"
         assert audit.leakage_failures == ()
 
@@ -89,12 +101,51 @@ class TestRealACBAudit:
         for game in games:
             key = game.competition.value if game.competition else "UNTAGGED"
             by_competition[key] = by_competition.get(key, 0) + 1
-        assert by_competition.get("REGULAR_SEASON") == REGULAR_SEASON_GAMES
-        assert by_competition.get("PLAYOFF") == PLAYOFF_GAMES
+        assert by_competition.get("REGULAR_SEASON") == ACB_REGULAR_GAMES
+        assert by_competition.get("PLAYOFF") == ACB_PLAYOFF_GAMES
         assert all(g.status is GameStatus.FINAL for g in games)
         minutes = sorted({ts.minutes for ts in repo.list_team_stats()
                           if ts.game_id.startswith("ACB")})
-        assert all(m >= 200 and (m - 200) % 25 == 0 for m in minutes), minutes
+        # 201/202 are the two documented 2020-21 playTime-drift rows
+        # (ACB2020-101226/ACB-CAZ, ACB2020-101300/ACB-FUE), retained verbatim
+        # and counted in _meta.team_minutes_drifted / the audit WARN
+        assert all(m in (200, 201, 202, 225, 250) for m in minutes), minutes
+
+    def test_club_identity_survives_sponsor_renames(self):
+        """The same club must keep ONE stored id across renamed seasons.
+
+        Real examples: Baskonia was TDS (2020-21) and is BKN (2025-26);
+        Tenerife was LNT and is LLT; Joventut was CJB and is JOV.
+        """
+        repo = _real_repo()
+        games = _acb_games(repo)
+        for season in ACB_SEASONS:
+            assert any(g.season == season for g in games), season
+        for team_id in ("ACB-BKN", "ACB-LLT", "ACB-JOV", "ACB-DGC", "ACB-MAN",
+                        "ACB-UCM", "ACB-BUR", "ACB-SBB", "ACB-FUE", "ACB-ILE"):
+            seasons = {g.season for g in games
+                       if team_id in (g.home_team_id, g.away_team_id)}
+            assert len(seasons) >= 2, (team_id, seasons)
+        # the historical-only clubs appear only in their own seasons
+        for team_id, season in (("ACB-MOV", "2020-21"), ("ACB-GBC", "2020-21"),
+                                ("ACB-ZPA", "2023-24"), ("ACB-COR", "2024-25")):
+            seasons = {g.season for g in games
+                       if team_id in (g.home_team_id, g.away_team_id)}
+            assert seasons == {season}, (team_id, seasons)
+
+    def test_distinct_club_count(self):
+        repo = _real_repo()
+        games = _acb_games(repo)
+        clubs = {t for g in games for t in (g.home_team_id, g.away_team_id)}
+        assert len(clubs) == ACB_DISTINCT_CLUBS, sorted(clubs)
+        per_season: dict[str, set[str]] = {}
+        for g in games:
+            per_season.setdefault(g.season, set()).update(
+                (g.home_team_id, g.away_team_id))
+        assert len(per_season["2020-21"]) == 19
+        for season in ACB_SEASONS:
+            if season != "2020-21":
+                assert len(per_season[season]) == 18, season
 
     def test_other_leagues_untouched(self):
         """ACB ingestion must not have touched the NBA or EuroLeague rows."""
@@ -109,55 +160,74 @@ class TestRealACBAudit:
 
 
 class TestRealACBBundle:
-    """Golden assertions against the archived raw bundle (untrimmed)."""
+    """Golden assertions against the archived raw bundles (untrimmed)."""
 
-    def _bundle_path(self) -> Path:
+    def _bundle_paths(self) -> list[Path]:
         raw_dir = Path(Settings.from_env().raw_dir) / "acb_api"
-        candidates = sorted(raw_dir.glob("*.json")) if raw_dir.exists() else []
+        candidates = sorted(
+            p for p in raw_dir.glob("acb_competition1_edition*.json")
+            if p.is_file() and not p.name.endswith(".manifest.json")
+        ) if raw_dir.exists() else []
         if not candidates:
-            pytest.skip(f"archived ACB raw bundle not available in {raw_dir}")
-        return candidates[0]
+            pytest.skip(f"archived ACB raw bundles not available in {raw_dir}")
+        return candidates
 
-    def test_archived_bundle_parses_to_the_ingested_season(self):
+    def test_every_archived_bundle_parses_and_matches_its_season(self):
         from basketball_agent.data.collectors.acb_api import load_acb_bundle_file
 
-        raw = load_acb_bundle_file(self._bundle_path())
-        assert raw["_meta"]["n_games"] == TOTAL_GAMES
-        assert raw["_meta"]["n_final"] == TOTAL_GAMES
-        assert raw["_meta"]["edition_id"] == 90
-        assert raw["_meta"]["season"] == ACB_SEASON
-        assert len(raw["teams"]) == 18
-        assert all(t["team_id"].startswith("ACB-") for t in raw["teams"])
+        parsed_seasons = {}
+        for path in self._bundle_paths():
+            raw = load_acb_bundle_file(path)
+            season = raw["_meta"]["season"]
+            parsed_seasons[season] = raw
+            total, regular, playoff = ACB_SEASONS[season]
+            assert raw["_meta"]["n_games"] == total, season
+            assert raw["_meta"]["n_final"] == total, season
+            assert all(t["team_id"].startswith("ACB-") for t in raw["teams"])
+            by_competition: dict[str, int] = {}
+            for game in raw["games"]:
+                by_competition[game["competition"]] = \
+                    by_competition.get(game["competition"], 0) + 1
+            assert by_competition == {"REGULAR_SEASON": regular, "PLAYOFF": playoff}, season
+        assert set(parsed_seasons) == set(ACB_SEASONS), sorted(parsed_seasons)
 
-    def test_archived_bundle_scores_match_the_database(self):
+    def test_archived_bundles_score_and_stats_match_the_database(self):
         from basketball_agent.data.collectors.acb_api import load_acb_bundle_file
 
         repo = _real_repo()
         games = {g.game_id: g for g in _acb_games(repo)}
-        raw = load_acb_bundle_file(self._bundle_path())
-        for game in raw["games"]:
-            stored = games[game["game_id"]]
-            assert stored.home_team_id == game["home_team_id"]
-            assert stored.away_team_id == game["away_team_id"]
-            assert stored.home_score == game["home_score"]
-            assert stored.away_score == game["away_score"]
-            assert stored.season == game["season"]
-            assert stored.competition.value == game["competition"]
-
-    def test_archived_bundle_team_stats_match_the_database(self):
-        from basketball_agent.data.collectors.acb_api import load_acb_bundle_file
-
-        repo = _real_repo()
         stored = {(ts.game_id, ts.team_id): ts for ts in repo.list_team_stats()
                   if ts.game_id.startswith("ACB")}
-        raw = load_acb_bundle_file(self._bundle_path())
-        assert len(raw["team_stats"]) == 2 * TOTAL_GAMES
-        for ts in raw["team_stats"]:
-            have = stored[(ts["game_id"], ts["team_id"])]
-            for field in ("minutes", "points", "possessions", "fg", "fga", "fg3",
-                          "fg3a", "ft", "fta", "orb", "drb", "trb", "ast", "tov",
-                          "stl", "blk", "pf", "is_home"):
-                assert getattr(have, field) == ts[field], (ts["game_id"], field)
+        compared_games = compared_rows = 0
+        for path in self._bundle_paths()[:1]:  # full field-by-field for one season
+            raw = load_acb_bundle_file(path)
+            for game in raw["games"]:
+                have = games[game["game_id"]]
+                assert have.home_team_id == game["home_team_id"]
+                assert have.away_team_id == game["away_team_id"]
+                assert have.home_score == game["home_score"]
+                assert have.away_score == game["away_score"]
+                assert have.season == game["season"]
+                assert have.competition.value == game["competition"]
+                compared_games += 1
+            for ts in raw["team_stats"]:
+                have = stored[(ts["game_id"], ts["team_id"])]
+                for field in ("minutes", "points", "possessions", "fg", "fga", "fg3",
+                              "fg3a", "ft", "fta", "orb", "drb", "trb", "ast", "tov",
+                              "stl", "blk", "pf", "is_home"):
+                    assert getattr(have, field) == ts[field], (ts["game_id"], field)
+                compared_rows += 1
+        assert compared_games > 300 and compared_rows > 600
+
+    def test_every_ingested_game_has_two_team_rows(self):
+        repo = _real_repo()
+        games = {g.game_id for g in _acb_games(repo)}
+        rows: dict[str, int] = {}
+        for ts in repo.list_team_stats():
+            if ts.game_id in games:
+                rows[ts.game_id] = rows.get(ts.game_id, 0) + 1
+        assert len(rows) == ACB_TOTAL_GAMES
+        assert set(rows.values()) == {2}
 
 
 class TestRealACBWindows:

@@ -83,14 +83,24 @@ def _players(total: dict, team_row: dict, n_players: int, playtime: str) -> list
 
 def _team_entry(team_id: int, club_id: int, code: str, name: str,
                 total: dict, team_row: dict, periods: int,
-                n_players: int = 10, playtime: str = "20:00") -> dict:
+                n_players: int = 10, playtime: str = "20:00",
+                trailing_empty_ot: bool = False) -> dict:
     stats_by_periods = [{
         "quarter": 0,
         "stats": {"players": _players(total, team_row, n_players, playtime),
                   "team": dict(team_row), "total": dict(total)},
     }]
+    # real per-period rows carry nonzero totals and on-court seconds for this
+    # team (a team CAN score 0 in a quarter but its players still clock time);
+    # the all-zero shape is reserved for the trailing empty OT slot artifact
     for quarter in range(1, periods + 1):
+        q_total = {**{f: 0 for f in PLAYER_FIELDS}, "points": 2}
+        q_team = {f: 0 for f in PLAYER_FIELDS}
         stats_by_periods.append({"quarter": quarter, "stats": {
+            "players": _players(q_total, q_team, n_players, playtime),
+            "team": q_team, "total": q_total}})
+    if trailing_empty_ot:
+        stats_by_periods.append({"quarter": periods + 1, "stats": {
             "players": [], "team": {}, "total": {}}})
     return {
         "team": {"id": team_id, "clubId": club_id, "abbreviatedName": code,
@@ -104,7 +114,8 @@ def _bundle(*, periods: int = 4, playtime: str = "20:00",
             home_score: int = 86, away_score: int = 68,
             quarter_scores: list[dict] | None = None,
             status: str = "FINALIZED",
-            subphase_id: int | None = None) -> dict:
+            subphase_id: int | None = None,
+            trailing_empty_ot: bool = False) -> dict:
     quarter_scores = quarter_scores or [
         {"quarter": 1, "homeScore": 15, "awayScore": 18},
         {"quarter": 2, "homeScore": 31, "awayScore": 16},
@@ -154,9 +165,11 @@ def _bundle(*, periods: int = 4, playtime: str = "20:00",
             "matchFinished": True,
             "teamBoxscores": [
                 _team_entry(4384, 14, "UNI", "Unicaja", REAL_TOTAL_UNI,
-                            REAL_TEAM_ROW_UNI, periods, playtime=playtime),
+                            REAL_TEAM_ROW_UNI, periods, playtime=playtime,
+                            trailing_empty_ot=trailing_empty_ot),
                 _team_entry(4389, 4, "SBB", "Surne Bilbao", REAL_TOTAL_SBB,
-                            REAL_TEAM_ROW_SBB, periods, playtime=playtime),
+                            REAL_TEAM_ROW_SBB, periods, playtime=playtime,
+                            trailing_empty_ot=trailing_empty_ot),
             ],
             "arena": "Martin Carpena", "attendance": 10123, "referees": [],
         }},
@@ -190,6 +203,65 @@ class TestTeamResolution:
         assert TEAM_TIMEZONES["DGC"] == "Atlantic/Canary"
         assert TEAM_TIMEZONES["LLT"] == "Atlantic/Canary"
         assert TEAM_TIMEZONES["BAR"] == "Europe/Madrid"
+
+    def test_relegation_promotion_clubs_resolve(self):
+        """Clubs that only appear in some seasons (Phase 8-B7 evidence)."""
+        assert resolve_team(6) == "ACB-MOV"      # Movistar Estudiantes
+        assert resolve_team(7) == "ACB-GBC"      # Acunsa GBC
+        assert resolve_team(15) == "ACB-BET"     # Real Betis Baloncesto
+        assert resolve_team(17) == "ACB-FUE"     # Fuenlabrada
+        assert resolve_team(57) == "ACB-MOB"     # Monbus Obradoiro
+        assert resolve_team(624) == "ACB-ZPA"    # Zunder Palencia
+        assert resolve_team(657) == "ACB-COR"    # Leyma Coruña
+
+
+class TestSponsorCodeAliases:
+    """ACB clubs rename with their sponsor; one club keeps ONE identity."""
+
+    @pytest.mark.parametrize("club_id,code,canonical", [
+        (3, "KBA", "BKN"), (3, "TDS", "BKN"),     # Kirolbet / TD Systems Baskonia
+        (5, "HGC", "DGC"), (5, "GCA", "DGC"),     # Herbalife / Gran Canaria
+        (8, "CJB", "JOV"),                        # Club Joventut Badalona
+        (10, "BAX", "MAN"),                       # BAXI Manresa
+        (12, "UCB", "UCM"),                       # UCAM Murcia CB
+        (17, "MKF", "FUE"), (17, "URF", "FUE"),   # Montakit / Urbas Fuenlabrada
+        (28, "IBT", "LLT"), (28, "LNT", "LLT"),   # Iberostar / Lenovo Tenerife
+        (549, "SPB", "BUR"),                      # San Pablo Burgos
+        (658, "HIO", "ILE"),                      # Hiopos Lleida
+    ])
+    def test_recorded_alias_parses_to_the_canonical_team(self, club_id, code, canonical):
+        bundle = _bundle()
+        bundle["calendar"]["teams"][0].update(
+            {"clubId": club_id, "abbreviatedName": code, "fullName": "Alias Club"})
+        bundle["boxscores"]["104459"]["teamBoxscores"][0]["team"].update(
+            {"clubId": club_id, "abbreviatedName": code})
+        raw = parse_acb_bundle(bundle)
+        assert raw["games"][0]["home_team_id"] == f"ACB-{canonical}"
+        assert raw["_meta"]["team_code_aliases_used"] == {code: canonical}
+
+    def test_bilbao_alias_on_the_away_side(self):
+        bundle = _bundle()
+        bundle["calendar"]["teams"][1].update(
+            {"clubId": 4, "abbreviatedName": "RBB", "fullName": "RETAbet Bilbao"})
+        bundle["boxscores"]["104459"]["teamBoxscores"][1]["team"].update(
+            {"clubId": 4, "abbreviatedName": "RBB"})
+        raw = parse_acb_bundle(bundle)
+        assert raw["games"][0]["away_team_id"] == "ACB-SBB"
+        assert raw["_meta"]["team_code_aliases_used"] == {"RBB": "SBB"}
+
+    def test_alias_of_another_club_is_rejected(self):
+        """A recorded alias must belong to THAT club id (no fuzzy matching)."""
+        from basketball_agent.data.collectors.acb_api import TEAM_CODE_ALIASES
+
+        bundle = _bundle()
+        assert "KBA" in TEAM_CODE_ALIASES[3]       # KBA belongs to clubId 3 …
+        bundle["calendar"]["teams"][0]["abbreviatedName"] = "KBA"  # … not to 14
+        with pytest.raises(ACBDataError, match="now abbreviates as"):
+            parse_acb_bundle(bundle)
+
+    def test_canonical_code_reports_no_alias_use(self):
+        raw = parse_acb_bundle(_bundle())
+        assert raw["_meta"]["team_code_aliases_used"] == {}
 
 
 class TestGoldenParse:
@@ -268,7 +340,48 @@ class TestOvertime:
                              {"quarter": 4, "homeScore": 20, "awayScore": 11},
                              {"quarter": 5, "homeScore": 0, "awayScore": 0},
                          ])
-        with pytest.raises(ACBDataError, match="team minutes"):
+        with pytest.raises(ACBDataError, match="team playtime"):
+            parse_acb_bundle(bundle)
+
+    def test_old_season_playtime_drift_is_accepted_and_counted(self):
+        """2020-21 real-data find: team playtime sums drift off the
+        period-derived expectation (up to ~2min observed).  Bounded drift
+        passes and is counted in _meta.team_minutes_drifted; the stored
+        minutes carry the nearest whole minute."""
+        # 10 players x 20:11 = 201:50 (12110s) vs 12000s expected -> +110s
+        raw = parse_acb_bundle(_bundle(playtime="20:11"))
+        assert raw["_meta"]["team_minutes_drifted"] == 2
+        assert all(ts["minutes"] == 202 for ts in raw["team_stats"])
+
+    def test_trailing_empty_ot_slot_is_ignored(self):
+        """Edition-87 real find: a 1-OT game ships an extra all-zero quarter
+        row (0 points, 00:00 playTime).  The adapter must derive 5 played
+        periods, not 6."""
+        bundle = _bundle(
+            periods=5, playtime="22:30", trailing_empty_ot=True,
+            quarter_scores=[
+                {"quarter": 1, "homeScore": 20, "awayScore": 22},
+                {"quarter": 2, "homeScore": 25, "awayScore": 21},
+                {"quarter": 3, "homeScore": 18, "awayScore": 19},
+                {"quarter": 4, "homeScore": 11, "awayScore": 4},
+                {"quarter": 5, "homeScore": 12, "awayScore": 2},
+            ],
+        )
+        raw = parse_acb_bundle(bundle)
+        assert raw["_meta"]["n_overtime"] == 1
+        assert all(ts["minutes"] == 225 for ts in raw["team_stats"])
+
+    def test_wild_playtime_drift_still_fails(self):
+        # 200 min in a 5-period game: +15min off the 225min expectation
+        bundle = _bundle(periods=5, playtime="20:00",
+                         quarter_scores=[
+                             {"quarter": 1, "homeScore": 15, "awayScore": 18},
+                             {"quarter": 2, "homeScore": 31, "awayScore": 16},
+                             {"quarter": 3, "homeScore": 20, "awayScore": 23},
+                             {"quarter": 4, "homeScore": 20, "awayScore": 11},
+                             {"quarter": 5, "homeScore": 0, "awayScore": 0},
+                         ])
+        with pytest.raises(ACBDataError, match="team playtime"):
             parse_acb_bundle(bundle)
 
 

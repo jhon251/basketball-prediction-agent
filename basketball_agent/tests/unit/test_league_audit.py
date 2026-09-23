@@ -312,3 +312,47 @@ class TestACBAudit:
         audit = audit_league(Repository(acb_db), League.ACB, leakage_sample=1)
         assert audit.leakage_sampled
         assert audit.leakage_failures == ()
+
+
+class TestPerSeasonScheduleReference:
+    """Phase 8-B7: a league whose season shape changes needs per-season counts."""
+
+    def test_per_season_map_passes_when_every_season_matches(self, acb_db):
+        audit = audit_league(
+            Repository(acb_db), League.ACB, leakage_sample=0,
+            expected_regular_by_season={"2025-26": 2},
+        )
+        check = next(c for c in audit.checks if c.name == "missing.games")
+        assert check.status == PASS and "complete" in check.detail
+
+    def test_per_season_map_fails_for_a_short_season(self, acb_db):
+        audit = audit_league(
+            Repository(acb_db), League.ACB, leakage_sample=0,
+            expected_regular_by_season={"2025-26": 306},
+        )
+        check = next(c for c in audit.checks if c.name == "missing.games")
+        assert check.status == FAIL and "2025-26: 2/306" in check.detail
+
+    def test_seasons_without_a_reference_are_reported(self, acb_db):
+        audit = audit_league(
+            Repository(acb_db), League.ACB, leakage_sample=0,
+            expected_regular_by_season={"1999-00": 306},
+        )
+        check = next(c for c in audit.checks if c.name == "missing.games")
+        assert check.status == PASS
+        assert "no reference for ['2025-26']" in check.detail
+
+    def test_single_and_per_season_references_conflict(self, acb_db):
+        with pytest.raises(ValueError, match="not both"):
+            audit_league(
+                Repository(acb_db), League.ACB, leakage_sample=0,
+                expected_regular_season_games=306,
+                expected_regular_by_season={"2025-26": 306},
+            )
+
+    def test_single_reference_still_works_for_the_old_leagues(self, el_db):
+        audit = audit_league(Repository(el_db), League.EUROLEAGUE, leakage_sample=0,
+                             expected_regular_season_games=100)
+        check = next(c for c in audit.checks if c.name == "missing.games")
+        assert check.status == FAIL
+        assert "expected 100 regular-season games/season" in check.detail

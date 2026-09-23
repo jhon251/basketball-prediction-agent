@@ -184,6 +184,9 @@ def _build_parser() -> argparse.ArgumentParser:
     la.add_argument("--expected-regular", type=int, default=None,
                     help="expected regular-season games per season (e.g. 306 for EuroLeague; "
                          "omit when no schedule reference is available)")
+    la.add_argument("--expected-regular-map", default=None,
+                    help="per-season schedule reference, e.g. "
+                         "\"2020-21=342,2021-22=306\" (league whose season shape changes)")
 
     return parser
 
@@ -560,10 +563,21 @@ def _cmd_league_audit(args) -> int:
 
     try:
         db, _ = _open_db()
+        expected_map = None
+        if args.expected_regular_map:
+            expected_map = {}
+            for chunk in args.expected_regular_map.split(","):
+                season, _, count = chunk.strip().partition("=")
+                if not season or not count.strip().isdigit():
+                    print(f"FAIL: --expected-regular-map entry {chunk!r} is not "
+                          "'<season>=<count>'", file=sys.stderr)
+                    return 1
+                expected_map[season.strip()] = int(count)
         audit = audit_league(
             Repository(db),
             League(args.league),
             expected_regular_season_games=args.expected_regular,
+            expected_regular_by_season=expected_map,
             leakage_sample=args.leakage_sample,
         )
     except Exception as exc:  # noqa: BLE001 — CLI boundary

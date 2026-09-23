@@ -17,9 +17,15 @@ Interpretation rules (fail loud, never guess):
   ``ACB<seasonStartYear>-<matchId>`` (e.g. ``ACB2025-104459``), mirroring the
   EuroLeague ``E<year>-<gameCode>`` convention;
 * **teams** are keyed on the stable ``clubId`` (sponsor names change, club ids
-  do not) and stored as ``ACB-<official code>`` (``ACB-UNI``, ``ACB-BAR``, …);
-  a clubId whose ``abbreviatedName`` disagrees with the recorded table is a
-  hard error — the table is evidence-based, never guessed;
+  do not) and stored as ``ACB-<official code>`` (``ACB-UNI``, ``ACB-BAR``, …).
+  Because ACB clubs rename with their sponsor (Baskonia: KBA → TDS → BKN;
+  Tenerife: IBT → LNT → LLT; Joventut: CJB → JOV), every historical code
+  observed in the real payloads is recorded in ``TEAM_CODE_ALIASES`` and maps
+  onto the club's canonical code, so one club keeps one identity across
+  seasons (multi-season Elo/strength continuity).  A clubId whose code is
+  neither canonical nor a recorded alias is a hard error — the table is
+  evidence-based, never guessed — and each alias actually used is reported in
+  ``_meta.team_code_aliases_used``;
 * **home/away** comes from the calendar (``homeTeamId``) and is cross-checked
   against ``MatchHeader.teams.home.id`` and the boxscore team ids: three
   independent statements must agree (the contract forbids guessing the venue
@@ -67,39 +73,83 @@ from basketball_agent.data.schemas.team import Team
 
 DATASET_MARKER = "acb-api-v1"
 
-#: ``clubId`` -> canonical ACB club code.  Taken from the official 2025-26
-#: payload (``abbreviatedName``), keyed on the stable club id: the display
-#: name carries the sponsor (``Asisa Joventut``) and changes, the club does not.
+#: Source-data defects that make a game unusable WITHOUT repairing it
+#: (Phase 8-B4 precedent, mirrored from euroleague_live).  Excluded games are
+#: skipped and reported in ``_meta["source_excluded"]`` — the source value is
+#: never edited and the validator is never loosened.
+#:
+#: ``ACB2021-102902`` (edition 86, 2021-22): ACB-BUR's 11 published player
+#: playTime rows sum to 13181s (219.7min) in a game the header's quarter
+#: scores confirm was 4 periods (200min); the opponent's rows sum exactly.
+#: One player row over-counts at the source — a repair would be a guess.
+KNOWN_SOURCE_DEFECTS: dict[str, str] = {
+    "ACB2021-102902": "ACB-BUR player playTime sums to 13181s for a 4-period "
+                      "game (12000s expected; source row over-counts); "
+                      "game excluded, value not repaired",
+}
+
+#: ``clubId`` -> canonical ACB club code.  Taken from the official payloads
+#: (``abbreviatedName``), keyed on the stable club id: the display name carries
+#: the sponsor (``Asisa Joventut``) and changes, the club does not.
 CLUB_ID_TO_TEAM: dict[int, str] = {
     2: "BAR",    # FC Barcelona
     3: "BKN",    # Saski Baskonia
     4: "SBB",    # Surne Bilbao Basket
     5: "DGC",    # Dreamland Gran Canaria
+    6: "MOV",    # Movistar Estudiantes (2019-20, 2020-21)
+    7: "GBC",    # Acunsa GBC (2020-21)
     8: "JOV",    # Joventut Badalona
     9: "RMB",    # Real Madrid
     10: "MAN",   # Baxi Manresa
     12: "UCM",   # UCAM Murcia
     13: "VBC",   # Valencia Basket
     14: "UNI",   # Unicaja
+    15: "BET",   # Real Betis Baloncesto
     16: "CAZ",   # Casademont Zaragoza
+    17: "FUE",   # Baloncesto Fuenlabrada
     22: "MBA",   # MoraBanc Andorra
     25: "BRE",   # Río Breogán
     28: "LLT",   # La Laguna Tenerife
+    57: "MOB",   # Monbus Obradoiro
     549: "BUR",  # San Pablo Burgos
     591: "GIR",  # Girona
     592: "COV",  # Covirán Granada
+    624: "ZPA",  # Zunder Palencia (2023-24)
+    657: "COR",  # Leyma Coruña (2024-25)
     658: "ILE",  # Hiopos Lleida
+}
+
+#: Historical (sponsor-driven) club codes observed in the real payloads for
+#: ACB 2019-20 .. 2025-26, per club id.  They resolve to the canonical code
+#: above so a club keeps ONE identity across seasons (Elo / strength features
+#: depend on that continuity).  A code that is neither the canonical one nor a
+#: recorded alias for THAT club is still a hard error.
+TEAM_CODE_ALIASES: dict[int, tuple[str, ...]] = {
+    3: ("KBA", "TDS"),        # Kirolbet / TD Systems Baskonia
+    4: ("RBB",),              # RETAbet Bilbao Basket
+    5: ("HGC", "GCA"),        # Herbalife / Gran Canaria
+    8: ("CJB",),              # Club Joventut Badalona
+    10: ("BAX",),             # BAXI Manresa
+    12: ("UCB",),             # UCAM Murcia CB
+    17: ("MKF", "URF"),       # Montakit / Urbas Fuenlabrada
+    28: ("IBT", "LNT"),       # Iberostar / Lenovo Tenerife
+    549: ("SPB",),            # San Pablo Burgos
+    658: ("HIO",),            # Hiopos Lleida (2024-25)
 }
 
 #: canonical code -> sponsor-free club name (registry display name)
 TEAM_NAMES: dict[str, str] = {
     "BAR": "FC Barcelona", "BKN": "Saski Baskonia", "SBB": "Surne Bilbao Basket",
-    "DGC": "Dreamland Gran Canaria", "JOV": "Joventut Badalona",
+    "DGC": "Dreamland Gran Canaria", "MOV": "Movistar Estudiantes",
+    "GBC": "Acunsa GBC", "JOV": "Joventut Badalona",
     "RMB": "Real Madrid", "MAN": "Baxi Manresa", "UCM": "UCAM Murcia",
-    "VBC": "Valencia Basket", "UNI": "Unicaja", "CAZ": "Casademont Zaragoza",
+    "VBC": "Valencia Basket", "UNI": "Unicaja", "BET": "Real Betis Baloncesto",
+    "CAZ": "Casademont Zaragoza", "FUE": "Baloncesto Fuenlabrada",
     "MBA": "MoraBanc Andorra", "BRE": "Río Breogán",
-    "LLT": "La Laguna Tenerife", "BUR": "San Pablo Burgos", "GIR": "Girona",
-    "COV": "Covirán Granada", "ILE": "Hiopos Lleida",
+    "LLT": "La Laguna Tenerife", "MOB": "Monbus Obradoiro",
+    "BUR": "San Pablo Burgos", "GIR": "Girona",
+    "COV": "Covirán Granada", "ZPA": "Zunder Palencia",
+    "COR": "Leyma Coruña", "ILE": "Hiopos Lleida",
 }
 
 #: venue IANA timezone per club.  The ACB API publishes UTC, so this table is
@@ -237,6 +287,22 @@ def _team_totals(box: dict, team_id: int, game_id: str) -> tuple[dict, int]:
         raise ACBDataError(
             f"game {game_id}: boxscore period 0 (game totals) missing for team {team_id}"
         )
+
+    # Trailing EMPTY overtime slots are a source artifact (Phase 8-B7, real
+    # find in edition 87: a 1-OT game ships an extra all-zero quarter=6 row
+    # with 0 points and 00:00 playTime for every player).  A genuinely played
+    # period always has points or on-court seconds for this team, so a
+    # trailing all-zero row can never be a real period — drop it.
+    while len(periods) > 1:
+        last_stats = periods[-1].get("stats") or {}
+        last_total = last_stats.get("total") or {}
+        last_secs = sum(
+            _playtime_seconds(p.get("playTime")) for p in (last_stats.get("players") or [])
+        )
+        if int(last_total.get("points") or 0) == 0 and last_secs == 0:
+            periods = periods[:-1]
+        else:
+            break
     stats = periods[0].get("stats") or {}
     total = stats.get("total") or {}
     team_row = stats.get("team") or {}
@@ -255,14 +321,21 @@ def _team_totals(box: dict, team_id: int, game_id: str) -> tuple[dict, int]:
             )
 
     seconds = sum(_playtime_seconds(p.get("playTime")) for p in players)
-    if seconds % 60 != 0:
-        raise ACBDataError(
-            f"game {game_id}/team {team_id}: player minutes sum to {seconds}s "
-            "(not a whole minute)"
-        )
-    minutes = seconds // 60
     if seconds == 0:
         raise ACBDataError(f"game {game_id}/team {team_id}: no player minutes")
+    # The 2025-26 season sums to the exact expected playtime, but older
+    # seasons carry noisy per-player playTime: 2020-21 observed team sums up
+    # to +135s off the period-derived expectation (with exact-to-the-second
+    # "MM:SS" rows, so this is source noise, not rounding).  Bounded
+    # tolerance (±300s = 5 min); ``line["minutes"]`` carries the nearest
+    # whole minute and every drifted team is counted in
+    # ``_meta.team_minutes_drifted`` — never silently normalized.
+    minutes = (seconds + 30) // 60
+    if not 180 <= minutes <= 280:
+        raise ACBDataError(
+            f"game {game_id}/team {team_id}: player minutes sum to {seconds}s "
+            f"({minutes}min) — outside plausible game length"
+        )
 
     fg2m = int(total.get("twoPointersMade") or 0)
     fg2a = int(total.get("twoPointersAttempted") or 0)
@@ -287,7 +360,7 @@ def _team_totals(box: dict, team_id: int, game_id: str) -> tuple[dict, int]:
     line["possessions"] = round(
         line["fga"] + 0.44 * line["fta"] - line["orb"] + line["tov"], 1
     )
-    return line, len(periods) - 1
+    return line, len(periods) - 1, seconds
 
 
 def _match_competition(round_obj: dict, game_id: str) -> Competition:
@@ -329,6 +402,7 @@ def parse_acb_bundle(bundle: dict) -> dict:
         raise ACBDataError("bundle contains no calendar rounds")
 
     club_by_team_id: dict[int, int] = {}
+    alias_used: dict[str, str] = {}
     for team in calendar.get("teams") or []:
         team_id = int(team["id"])
         club_id = int(team["clubId"])
@@ -338,12 +412,17 @@ def parse_acb_bundle(bundle: dict) -> dict:
                 f"unknown ACB clubId {club_id} in the calendar (extend "
                 "acb_api.CLUB_ID_TO_TEAM from a real payload; never guess)"
             )
-        if str(team.get("abbreviatedName") or "").strip().upper() != expected:
+        code = str(team.get("abbreviatedName") or "").strip().upper()
+        aliases = TEAM_CODE_ALIASES.get(club_id, ())
+        if code != expected and code not in aliases:
             raise ACBDataError(
                 f"clubId {club_id} now abbreviates as "
-                f"{team.get('abbreviatedName')!r} but the table says {expected!r}; "
-                "update the table from the real payload (never guess)"
+                f"{team.get('abbreviatedName')!r} but the table says {expected!r} "
+                f"(recorded aliases: {list(aliases)}); update the table from the "
+                "real payload (never guess)"
             )
+        if code != expected:
+            alias_used[code] = expected
         club_by_team_id[team_id] = club_id
 
     games: list[Game] = []
@@ -351,7 +430,9 @@ def parse_acb_bundle(bundle: dict) -> dict:
     teams: dict[str, Team] = {}
     postponed = cancelled = 0
     estimated = 0
+    excluded: list[tuple[str, str]] = []
     overtime_games = 0
+    minutes_drifted = 0
     out_of_order: list[str] = []
     max_round_seen = 0
 
@@ -412,6 +493,10 @@ def parse_acb_bundle(bundle: dict) -> dict:
             raise ACBDataError(f"game {game_id}: FINALIZED without scores")
 
         key = str(match_id)
+        defect_reason = KNOWN_SOURCE_DEFECTS.get(game_id)
+        if defect_reason is not None:
+            excluded.append((game_id, defect_reason))
+            continue
         header = headers.get(key)
         box = boxscores.get(key)
         if header is None:
@@ -444,8 +529,8 @@ def parse_acb_bundle(bundle: dict) -> dict:
                 f"{header.get('currentHomeScore')}-{header.get('currentAwayScore')}"
             )
 
-        home_line, home_periods = _team_totals(box, home_team_id, game_id)
-        away_line, away_periods = _team_totals(box, away_team_id, game_id)
+        home_line, home_periods, home_seconds = _team_totals(box, home_team_id, game_id)
+        away_line, away_periods, away_seconds = _team_totals(box, away_team_id, game_id)
         if home_periods != away_periods:
             raise ACBDataError(
                 f"game {game_id}: teams report {home_periods} vs {away_periods} periods"
@@ -460,13 +545,16 @@ def parse_acb_bundle(bundle: dict) -> dict:
         overtime = periods > 4
         if overtime:
             overtime_games += 1
-        expected_minutes = 200 + 25 * (periods - 4)
-        for team_id, line in ((home_id, home_line), (away_id, away_line)):
-            if line["minutes"] != expected_minutes:
+        expected_seconds = (200 + 25 * (periods - 4)) * 60
+        for team_id, line, seconds in ((home_id, home_line, home_seconds),
+                                       (away_id, away_line, away_seconds)):
+            if abs(seconds - expected_seconds) > 300:
                 raise ACBDataError(
-                    f"game {game_id}/{team_id}: {line['minutes']} team minutes for a "
-                    f"{periods}-period game (expected {expected_minutes})"
+                    f"game {game_id}/{team_id}: {seconds}s team playtime for a "
+                    f"{periods}-period game (expected ~{expected_seconds}s)"
                 )
+            if seconds != expected_seconds:
+                minutes_drifted += 1
 
         quarter_scores = header.get("quarterScores") or []
         if len(quarter_scores) != periods:
@@ -520,6 +608,7 @@ def parse_acb_bundle(bundle: dict) -> dict:
             "n_postponed": postponed,
             "n_cancelled": cancelled,
             "n_overtime": overtime_games,
+            "team_minutes_drifted": minutes_drifted,
             "possessions_estimated_for": estimated,
             "edition_id": edition,
             "season": season,
@@ -528,6 +617,9 @@ def parse_acb_bundle(bundle: dict) -> dict:
             "competition_name": bundle.get("competition_name"),
             "source": bundle.get("source"),
             "matches_out_of_round_order": out_of_order,
+            "team_code_aliases_used": alias_used,
+            "source_excluded": [{"game_id": gid, "reason": reason}
+                                for gid, reason in excluded],
         },
     }
 

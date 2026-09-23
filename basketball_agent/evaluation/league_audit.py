@@ -113,10 +113,23 @@ def audit_league(
     league: League,
     *,
     expected_regular_season_games: int | None = None,
+    expected_regular_by_season: dict[str, int] | None = None,
     leakage_sample: int = 3,
     leakage_reference: datetime | None = None,
 ) -> LeagueAudit:
-    """Run the full audit battery for one league (read-only)."""
+    """Run the full audit battery for one league (read-only).
+
+    ``expected_regular_season_games`` is one schedule reference applied to
+    every season; ``expected_regular_by_season`` (Phase 8-B7) supplies a
+    per-season reference instead, which is what a league whose season shape
+    changes over time needs (e.g. ACB 2020-21 had 19 clubs / 38 rounds).
+    Passing both is an error.
+    """
+    if expected_regular_season_games is not None and expected_regular_by_season:
+        raise ValueError(
+            "pass either expected_regular_season_games or "
+            "expected_regular_by_season, not both"
+        )
     games = [g for g in repo.list_games() if g.league is league]
     checks: list[AuditCheck] = []
 
@@ -254,7 +267,22 @@ def audit_league(
     ))
 
     # 7) missing games ------------------------------------------------------
-    if expected_regular_season_games is None:
+    if expected_regular_by_season:
+        short = [
+            f"{s.season}: {s.regular_season}/{expected_regular_by_season.get(s.season)}"
+            for s in seasons
+            if expected_regular_by_season.get(s.season) is not None
+            and s.regular_season != expected_regular_by_season[s.season]
+        ]
+        unknown = [s.season for s in seasons
+                   if s.season not in expected_regular_by_season]
+        checks.append(AuditCheck(
+            "missing.games", PASS if not short else FAIL,
+            f"per-season reference for {len(expected_regular_by_season)} season(s); "
+            + ("all seasons complete" if not short else f"incomplete: {short}")
+            + (f"; no reference for {unknown}" if unknown else ""),
+        ))
+    elif expected_regular_season_games is None:
         checks.append(AuditCheck(
             "missing.games", WARN,
             "no schedule reference supplied; per-season regular-season counts reported only",

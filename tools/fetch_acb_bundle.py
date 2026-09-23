@@ -64,10 +64,16 @@ def fetch_json(
     *,
     api_key: str = DEFAULT_API_KEY,
     timeout: float = 60.0,
-    retries: int = 5,
+    retries: int = 6,
     backoff: float = 2.0,
 ):
-    """GET one ACB API path with bounded retries (429-aware)."""
+    """GET one ACB API path with bounded retries (429/connection aware).
+
+    The public API drops connections when it is hammered (verified Phase 8-B7:
+    three parallel fetchers were refused after ~25 minutes), so connection
+    level failures back off much longer than HTTP ones and the caller is
+    expected to ``--resume`` instead of restarting from scratch.
+    """
     url = path if path.startswith("http") else BASE + path
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -103,7 +109,14 @@ def fetch_json(
                     time.sleep(wait)
                 else:
                     time.sleep(backoff * attempt)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            last_error = exc
+            if attempt < retries:
+                wait = min(max(15.0 * attempt, backoff * attempt), 120.0)
+                print(f"  connection problem ({type(exc).__name__}); "
+                      f"sleeping {wait:.0f}s", file=sys.stderr)
+                time.sleep(wait)
+        except json.JSONDecodeError as exc:
             last_error = exc
             if attempt < retries:
                 time.sleep(backoff * attempt)
