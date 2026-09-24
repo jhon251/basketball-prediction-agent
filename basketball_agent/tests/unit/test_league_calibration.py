@@ -58,13 +58,16 @@ def _without_stamp(params):
 
 class TestBoundaryHits:
     def test_edges_are_recorded(self):
-        hits = _boundary_hits(8.0, 0.0, 0.05)
+        hits = _boundary_hits(4.0, 0.0, 0.05)  # C2 grid: 4.0 is the lower edge
         assert any("LOWER" in h for h in hits)
         assert any("k=0" in h for h in hits)
         assert any("lambda=0.05" in h and "UPPER" in h for h in hits)
 
     def test_interior_values_have_no_hits(self):
-        assert _boundary_hits(11.5, 5.0, 0.02) == ()
+        # 8.0 and 11.5 were the C1 lower edge / frozen default; both are
+        # interior points of the C2 grid now
+        assert _boundary_hits(8.0, 5.0, 0.02) == ()
+        assert _boundary_hits(11.5, 20.0, 0.02) == ()
 
     def test_fit_records_its_own_hits(self, tmp_path):
         repo = Repository(_synthetic_nba_db(tmp_path))
@@ -243,3 +246,29 @@ class TestParamsApplication:
         ).predict("90001205_T03_T04", as_of=as_of)
         assert (fitted_agent.win_probability_home
                 > frozen.win_probability_home)
+
+
+class TestC2Grids:
+    """Phase 8-C2: ONLY the scale and shrinkage grids were widened."""
+
+    def test_widened_grids(self):
+        from basketball_agent.evaluation.param_tuning import (
+            LAMBDA_CANDIDATES, LOGISTIC_CANDIDATES, SHRINKAGE_CANDIDATES,
+        )
+
+        assert LOGISTIC_CANDIDATES[0] == 4.0 and LOGISTIC_CANDIDATES[-1] == 18.0
+        assert len(LOGISTIC_CANDIDATES) == 29  # 4.0..18.0 step 0.5
+        assert SHRINKAGE_CANDIDATES == (0, 2, 5, 10, 20, 30, 40)
+        assert LAMBDA_CANDIDATES == (0.0, 0.02, 0.05)  # untouched
+
+    def test_boundary_messages_track_constants(self):
+        hits = _boundary_hits(4.0, 40, 0.05)
+        assert any("LOWER edge (4)" in h for h in hits)
+        assert any("k=40 at grid UPPER edge (40)" in h for h in hits)
+        assert any("lambda=0.05" in h and "UPPER edge (0.05)" in h for h in hits)
+
+    def test_frozen_defaults_untouched(self):
+        cfg = WinProbabilityConfig()
+        assert cfg.home_court_advantage == 2.5
+        assert cfg.margin_logistic_scale == 11.5
+        assert cfg.shrinkage_k == 5.0

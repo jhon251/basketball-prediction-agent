@@ -28,8 +28,12 @@ from basketball_agent.models.win_probability import WinProbabilityConfig
 UTC = timezone.utc
 
 LAMBDA_CANDIDATES = (0.0, 0.02, 0.05)
-SHRINKAGE_CANDIDATES = (0, 2, 5, 10, 20)
-LOGISTIC_CANDIDATES = tuple(x / 2.0 for x in range(16, 37))  # 8.0 .. 18.0
+# Phase 8-C2: the C1 grids hit their edges in every window (scale at the 8.0
+# LOWER edge 9/9, k at 20 in NBA long windows), so ONLY these two grids were
+# widened — lambda candidates are untouched, and the frozen defaults
+# (scale=11.5, k=5) are untouched with them.
+SHRINKAGE_CANDIDATES = (0, 2, 5, 10, 20, 30, 40)
+LOGISTIC_CANDIDATES = tuple(x / 2.0 for x in range(8, 37))  # 4.0 .. 18.0
 
 #: The strength-grid walk-forward pass has always used a fixed 5-game warmup
 #: (independent of ``fit_v1_params(warmup_games=...)``, which only ever fed
@@ -180,13 +184,13 @@ def _boundary_hits(scale: float, k: float, lam: float) -> tuple[str, ...]:
     """
     hits: list[str] = []
     if scale <= LOGISTIC_CANDIDATES[0] + 1e-9:
-        hits.append(f"scale={scale:g} at grid LOWER edge (8.0)")
+        hits.append(f"scale={scale:g} at grid LOWER edge ({LOGISTIC_CANDIDATES[0]:g})")
     if scale >= LOGISTIC_CANDIDATES[-1] - 1e-9:
-        hits.append(f"scale={scale:g} at grid UPPER edge (18.0)")
+        hits.append(f"scale={scale:g} at grid UPPER edge ({LOGISTIC_CANDIDATES[-1]:g})")
     if k <= SHRINKAGE_CANDIDATES[0]:
         hits.append("k=0 at grid edge (no shrinkage)")
     if k >= SHRINKAGE_CANDIDATES[-1]:
-        hits.append(f"k={k:g} at grid UPPER edge (20)")
+        hits.append(f"k={k:g} at grid UPPER edge ({SHRINKAGE_CANDIDATES[-1]:g})")
     if lam <= LAMBDA_CANDIDATES[0] + 1e-12:
         hits.append("lambda=0.0 at grid edge (no decay)")
     if lam >= LAMBDA_CANDIDATES[-1] - 1e-12:
@@ -271,8 +275,9 @@ def fit_v1_params_ex(
         decay_lambda=best_lambda,
         training_window=(window_start.isoformat(), cutoff.isoformat()),
         selection_method=(
-            "HCA: mean home margin; logistic scale: grid 8..18 step .5; "
-            "shrinkage k: grid {0,2,5,10,20}; decay lambda: sweep "
+            f"HCA: mean home margin; logistic scale: grid "
+            f"{LOGISTIC_CANDIDATES[0]:g}..{LOGISTIC_CANDIDATES[-1]:g} step .5; "
+            f"shrinkage k: grid {list(SHRINKAGE_CANDIDATES)}; decay lambda: sweep "
             f"{sorted(lambda_candidates)} — all by train-window walk-forward"
         ),
         validation_logloss=float(best_sweep["log_loss"]),
