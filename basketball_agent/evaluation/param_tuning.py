@@ -48,6 +48,9 @@ class FittedParams:
     selection_method: str
     validation_logloss: float
     fitted_at: str
+    # Phase 8-C1: grid edges hit by this fit, recorded verbatim.  A hit does
+    # NOT widen the search — the grid stays frozen and the hit is reported.
+    boundary_hits: tuple[str, ...] = ()
 
     def to_win_config(self) -> WinProbabilityConfig:
         return WinProbabilityConfig(
@@ -169,7 +172,29 @@ def estimate_shrinkage_k(
     return best_k
 
 
-def fit_v1_params(
+def _boundary_hits(scale: float, k: float, lam: float) -> tuple[str, ...]:
+    """Record grid edges chosen by a fit (Phase 8-C1, requirement 6).
+
+    The grids themselves are frozen constants; a hit is reported, never
+    auto-expanded.
+    """
+    hits: list[str] = []
+    if scale <= LOGISTIC_CANDIDATES[0] + 1e-9:
+        hits.append(f"scale={scale:g} at grid LOWER edge (8.0)")
+    if scale >= LOGISTIC_CANDIDATES[-1] - 1e-9:
+        hits.append(f"scale={scale:g} at grid UPPER edge (18.0)")
+    if k <= SHRINKAGE_CANDIDATES[0]:
+        hits.append("k=0 at grid edge (no shrinkage)")
+    if k >= SHRINKAGE_CANDIDATES[-1]:
+        hits.append(f"k={k:g} at grid UPPER edge (20)")
+    if lam <= LAMBDA_CANDIDATES[0] + 1e-12:
+        hits.append("lambda=0.0 at grid edge (no decay)")
+    if lam >= LAMBDA_CANDIDATES[-1] - 1e-12:
+        hits.append(f"lambda={lam:g} at grid UPPER edge ({LAMBDA_CANDIDATES[-1]:g})")
+    return tuple(hits)
+
+
+def fit_v1_params_ex(
     repo: Repository,
     cutoff: datetime,
     *,
@@ -179,7 +204,8 @@ def fit_v1_params(
     seed: int = 7,
     warmup_games: int = 5,
     league: League | None = None,
-) -> FittedParams:
+    include_sweep: bool = False,
+):
     """Full train-only parameter fit (HCA -> scale -> k -> decay lambda).
 
     Every step is evaluated by walk-forward backtest restricted to the
@@ -238,7 +264,7 @@ def fit_v1_params(
 
     window_start = games[0].game_date
     fitted_at = datetime.now(timezone.utc).isoformat()
-    return FittedParams(
+    params = FittedParams(
         home_court_advantage=hca,
         margin_logistic_scale=scale,
         shrinkage_k=k,
@@ -251,7 +277,11 @@ def fit_v1_params(
         ),
         validation_logloss=float(best_sweep["log_loss"]),
         fitted_at=fitted_at,
+        boundary_hits=_boundary_hits(scale, k, best_lambda),
     )
+    if include_sweep:
+        return params, {lam: summary for lam, summary in sweep.items()}
+    return params
 
 
 def save_fitted_params(params: FittedParams, path: Path | str) -> None:
@@ -263,6 +293,8 @@ def save_fitted_params(params: FittedParams, path: Path | str) -> None:
 def load_fitted_params(path: Path | str) -> FittedParams:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     data["training_window"] = tuple(data["training_window"])
+    if "boundary_hits" in data and isinstance(data["boundary_hits"], list):
+        data["boundary_hits"] = tuple(data["boundary_hits"])
     return FittedParams(**data)
 
 
@@ -281,3 +313,23 @@ def format_param_report(params: FittedParams) -> str:
         f"validation logloss    {params.validation_logloss:.4f}",
     ]
     return "\n".join(lines)
+
+
+def fit_v1_params(
+    repo: Repository,
+    cutoff: datetime,
+    *,
+    train_start: datetime | None = None,
+    lambda_candidates: tuple[float, ...] = LAMBDA_CANDIDATES,
+    n_simulations: int = 100,
+    seed: int = 7,
+    warmup_games: int = 5,
+    league: League | None = None,
+) -> FittedParams:
+    """``fit_v1_params_ex`` without the sweep table (Phase 8-C1)."""
+    return fit_v1_params_ex(
+        repo, cutoff, train_start=train_start,
+        lambda_candidates=lambda_candidates, n_simulations=n_simulations,
+        seed=seed, warmup_games=warmup_games, league=league,
+        include_sweep=False,
+    )

@@ -111,6 +111,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="random seed (deterministic mode; default from settings: 42)")
     p.add_argument("--save", action="store_true",
                    help="persist the prediction for later settlement")
+    p.add_argument("--params", default=None,
+                   help="apply CALIBRATED parameters from a calibrate --save-params "
+                        "JSON file (explicit opt-in; without it the frozen defaults "
+                        "are used)")
 
     st = sub.add_parser("settle", help="settle saved predictions for a FINAL game (spec §33)")
     st.add_argument("game_id", help="FINAL game whose saved predictions should be settled")
@@ -163,6 +167,26 @@ def _build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE", "ACB"],
                     help="restrict the evaluation window to one league (default: all)")
     wb.add_argument("--n-simulations", type=int, default=100)
+
+    cal = sub.add_parser("calibrate",
+                         help="per-league calibration: fit on the train window, "
+                              "compare frozen vs fitted on a held-out window")
+    cal.add_argument("--league", required=True, choices=["NBA", "EUROLEAGUE", "ACB"])
+    cal.add_argument("--cutoff", required=True,
+                     help="train window end (ISO, UTC); the fit sees nothing after it")
+    cal.add_argument("--test-start", required=True, help="held-out window start (ISO, UTC)")
+    cal.add_argument("--test-end", default=None, help="held-out window end (ISO, UTC)")
+    cal.add_argument("--train-seasons", type=int, default=None, choices=[1, 3, 5],
+                     help="bound the fitting window to the last N seasons (default: all "
+                          "available before the cutoff)")
+    cal.add_argument("--train-start", default=None,
+                     help="explicit train window start (overrides --train-seasons)")
+    cal.add_argument("--save-params", default=None,
+                     help="write the fitted parameters to this JSON file (explicit "
+                          "opt-in; predict --params applies them)")
+    cal.add_argument("--n-simulations", type=int, default=100)
+    cal.add_argument("--seed", type=int, default=7)
+    cal.add_argument("--warmup", type=int, default=5)
     wb.add_argument("--seed", type=int, default=7)
     wb.add_argument("--warmup", type=int, default=5)
 
@@ -265,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_experiments(args)
     if args.command == "window-backtest":
         return _cmd_window_backtest(args)
+    if args.command == "calibrate":
+        return _cmd_calibrate(args)
     if args.command == "league-audit":
         return _cmd_league_audit(args)
     if args.command == "report":
@@ -281,12 +307,28 @@ def _cmd_predict(args) -> int:
         db, settings = _open_db()
         repo = Repository(db)
         as_of = _parse_as_of(args.as_of)
+        win_config = None
+        params_note = ""
+        if getattr(args, "params", None):
+            from basketball_agent.evaluation.param_tuning import load_fitted_params
+
+            fitted = load_fitted_params(args.params)
+            win_config = fitted.to_win_config()
+            params_note = (f"Calibrated params: {args.params} "
+                           f"(HCA={fitted.home_court_advantage:.2f} "
+                           f"scale={fitted.margin_logistic_scale:.2f} "
+                           f"k={fitted.shrinkage_k:.1f} "
+                           f"lambda={fitted.decay_lambda:.3f}, fitted "
+                           f"{fitted.training_window[0][:10]} .. "
+                           f"{fitted.training_window[1][:10]})")
         agent = PredictionAgent(
             repo,
             n_simulations=args.n_simulations or settings.default_n_simulations,
             seed=args.seed if args.seed is not None else settings.default_seed,
-            decay_lambda=settings.decay_lambda,
+            decay_lambda=(fitted.decay_lambda if win_config is not None
+                          else settings.decay_lambda),
             snapshot_id=_latest_snapshot_id(),
+            win_config=win_config,
         )
         prediction = agent.predict(args.game_id, as_of=as_of)
     except PredictionError as exc:
@@ -302,6 +344,8 @@ def _cmd_predict(args) -> int:
         if team is not None:
             team_names[team_id] = team.name
 
+    if params_note:
+        print(params_note)
     print(format_report(prediction, team_names))
 
     if args.save:
@@ -589,6 +633,61 @@ def _cmd_league_audit(args) -> int:
 
 def _fmt(value):
     return f"{value:.4f}" if value is not None else "n/a"
+
+
+def _cmd_calibrate(args) -> int:
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    from basketball_agent.data.schemas.base import League
+    from basketball_agent.evaluation.experiments import resolve_train_start
+    from basketball_agent.evaluation.league_calibration import (
+        calibrate_window, frozen_vs_fitted_table,
+    )
+    from basketball_agent.evaluation.param_tuning import save_fitted_params
+
+    try:
+        db, _ = _open_db()
+        cutoff = _parse_as_of(args.cutoff)
+        test_start = _parse_as_of(args.test_start)
+        test_end = _parse_as_of(args.test_end) if args.test_end else None
+        if cutoff is None or test_start is None:
+            print("FAIL: --cutoff and --test-start must be valid ISO timestamps",
+                  file=sys.stderr)
+            return 1
+        if args.train_start and args.train_seasons:
+            print("FAIL: use either --train-start or --train-seasons, not both",
+                  file=sys.stderr)
+            return 1
+        league = League(args.league)
+        if args.train_start:
+            train_start = _parse_as_of(args.train_start)
+        else:
+            # anchor the fit window to the season BEFORE the cutoff (a cutoff
+            # on a season boundary would otherwise produce an empty window)
+            train_start = (resolve_train_start(cutoff - _td(days=1), args.train_seasons)
+                           if args.train_seasons else None)
+        result = calibrate_window(
+            Repository(db), league,
+            cutoff=cutoff, test_start=test_start, test_end=test_end,
+            train_start=train_start,
+            n_simulations=args.n_simulations, seed=args.seed, warmup_games=args.warmup,
+        )
+        if args.save_params:
+            save_fitted_params(result["fitted"], args.save_params)
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(frozen_vs_fitted_table(result))
+    if args.save_params:
+        print(f"fitted parameters saved: {args.save_params} "
+              "(apply explicitly with: basketball predict <game_id> --params "
+              f"{args.save_params})")
+    if result["fitted"].decay_lambda == 0.0:
+        print("lambda=0.0 chosen on the train window: no decay benefit -> "
+              "the frozen defaults remain the reference (fitted == frozen "
+              "except HCA/scale/k).")
+    return 0
 
 
 def _cmd_report(args) -> int:

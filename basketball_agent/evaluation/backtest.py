@@ -54,14 +54,21 @@ class Predictor(Protocol):
 
 
 class SimulationPredictor:
-    """The system under test: features -> models -> Monte Carlo."""
+    """The system under test: features -> models -> Monte Carlo.
 
-    def __init__(self, n_simulations: int = 1000, seed: int = 7) -> None:
+    ``win_config`` (Phase 8-C1) optionally applies CALIBRATED strength-model
+    parameters (HCA / logistic scale / shrinkage k); ``None`` keeps the
+    frozen defaults.  It never mutates the defaults.
+    """
+
+    def __init__(self, n_simulations: int = 1000, seed: int = 7,
+                 win_config: WinProbabilityConfig | None = None) -> None:
         self.n_simulations = n_simulations
         self.seed = seed
+        self.win_config = win_config
 
     def predict(self, features: GameFeatures) -> Prediction:
-        params = build_game_params(features)
+        params = build_game_params(features, win_config=self.win_config)
         result = MonteCarloRunner(seed=self.seed).run(params, n_simulations=self.n_simulations)
         return Prediction(
             game_id=features.game_id,

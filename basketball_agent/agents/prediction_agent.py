@@ -18,6 +18,7 @@ from basketball_agent.evaluation.leakage import check_temporal_integrity, realit
 from basketball_agent.features.base import GameFeatures
 from basketball_agent.features.feature_pipeline import FeaturePipeline
 from basketball_agent.models.game_params import GamePredictionParams, build_game_params
+from basketball_agent.models.win_probability import WinProbabilityConfig
 from basketball_agent.simulation.monte_carlo import MonteCarloResult, MonteCarloRunner
 
 
@@ -74,6 +75,7 @@ class PredictionAgent:
         snapshot_id: str | None = None,
         model_version: str = __version__,
         include_non_regular_history: bool = False,
+        win_config: "WinProbabilityConfig | None" = None,
     ) -> None:
         self._repo = repo
         self._n_simulations = n_simulations
@@ -85,6 +87,9 @@ class PredictionAgent:
         self._risk = RiskAgent()
         self._snapshot_id = snapshot_id
         self._model_version = model_version
+        # Phase 8-C1: optional CALIBRATED strength parameters (explicit
+        # --params path); None keeps the frozen defaults untouched.
+        self._win_config = win_config
         self._pipeline = FeaturePipeline(
             repo,
             decay_lambda=decay_lambda,
@@ -104,7 +109,7 @@ class PredictionAgent:
         if leakage.status == "FAIL":
             raise PredictionError("leakage detection FAILED: " + "; ".join(leakage.violations))
 
-        params = build_game_params(features)
+        params = build_game_params(features, win_config=self._win_config)
         mc = MonteCarloRunner(seed=self._seed).run(params, n_simulations=self._n_simulations)
         risk = self._risk.assess(features, params, mc)
         ensemble = self._ensemble.predict(features, mc)

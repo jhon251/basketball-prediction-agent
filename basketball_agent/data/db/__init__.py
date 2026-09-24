@@ -1,14 +1,7 @@
-"""Storage layer: SQLite database, repositories and guarded ingestion."""
+"""Storage layer: SQLite database, repositories and guarded ingestion.
 
-from basketball_agent.data.db.connection import Database, SCHEMA_VERSION
-from basketball_agent.data.db.loader import DataIngestor, IngestBlockedError, IngestResult
-from basketball_agent.data.db.repository import Repository
-
-__all__ = [
-    "Database",
-    "DataIngestor",
-    "IngestBlockedError",
-    "IngestResult",
-    "Repository",
-    "SCHEMA_VERSION",
-]
+Submodules are imported by their full paths (``data.db.connection`` etc.);
+this package deliberately has no eager re-exports so importing the storage
+package never drags the agents/evaluation layers into import cycles
+(latent cycle found and removed in Phase 8-C1).
+"""
