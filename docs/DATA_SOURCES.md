@@ -123,17 +123,22 @@ LiveStats 端点收紧 → nbl.com.au 官方 gamecenter（JS 渲染，抓取成�
 
 ## 5. CBA（中国男子篮球职业联赛）
 
-### 主源：cbaleague.com 官方数据站 ✅ 实测（站点/栏目确认）
-- 有球员/球队/比赛/排行完整数据栏目 ✅。
-- **重大障碍（🟡 CSDN 逆向文章确认）：API 响应为 AES/ECB/PKCS7 加密字符串**，需前端 JS 调试取得密钥后解密。可做但不轻；密钥可能随时轮换。
-- PBP：官方不公开体系化 PBP；球员 box ✅。
+> **Phase 8-E 修订（2026-09-27，实测后）**：下方"降级方案"在本环境实测后反转——RealGM 不可用（见证据），官方站成为实际主源并已打通。
 
-### 备源 A：RealGM Chinese CBA ✅ 实测（导航确认）— 英文界面、赛季历史完整，无加密问题，**推荐为第一接入源**（尽管字段不如官方全）
-### 备源 B：Basketball-Reference CBA 板块 🟡（存在，403 反爬同 ACB）
-### 数据集：SciDB "2022-2023 CBA Official Data" ✅ 交叉确认（含裁判数据，仅单赛季）
+### 实际主源（8-E 起生效）：cbaleague.com 官方数据 API ✅ 实测（全链路打通）
+- SPA（`www.cbaleague.com/data/`）后端 `data-server.cbaleague.com/api`；**所有 JSON 响应为 AES-128/ECB/PKCS7 加密**（B0 记录属实），但密钥就在站点公开 JS bundle（`assets/index.e20827fb.js`）——`tools/fetch_cba_bundle.py` 内置纯 Python AES（FIPS-197/SP800-38A 自检）解密，零新依赖。
+- 端点：`getTeam`（20 队）、`schedules/month`（官方逐日场次=完整性参照）、`schedules/day`（逐场主客/比分/类型/状态）、`team-match-datas/match-logs-basic/{teamId}`（逐场**球队级官方 box score**：fg/fga、3p/3pa、ft/fta、前/后场篮板、助攻、抢断、盖帽、失误、犯规；stage 1=常规赛 2=季后赛）。
+- **赛制修订（B0 假设错误，实测证据）**：CBA 2024-25 及以前为 4×12（2880s，官方 minutes=48）；**2025-26 起改用 FIBA 4×10（2400s，minutes=40）**——逐场 quarter/minutes 字段自洽（40+5×加时）。多赛季 CBA 需按赛季区分 regulation。
+- matchTypeId：1=常规赛→REGULAR_SEASON，2=季后赛→PLAYOFF，3=季前赛、4=全明星→丢弃计数，9=保级赛→CUP。
 
-### 降级方案
-官方加密接口维护成本过高 → **RealGM 为主** → Basketball-Reference → 手动请求官方站点历史页。
+### B0 备源 A：RealGM Chinese CBA（league id=40）❌ **实测 BLOCKED（8-E 取证）**
+- 直连 curl（带浏览器 UA）403 ×3；reader 服务仅命中 2025-01 陈旧快照（2024-25 赛季仅显示 33-34 场/队，非完整赛程），schedule/games 路径被客户端拦截；代理通道（jina/allorigins）连接层失败。
+
+### 备源 B：Basketball-Reference CBA 板块 ❌ 实测连接层失败（000，无响应体）
+### 数据集：SciDB "2022-2023 CBA Official Data" ✅ 存在但为**裁判执裁数据**（非球队 box score），不满足 schema → 不适用
+
+### 降级链（8-E 实测后）
+~~RealGM~~（BLOCKED）→ ~~Basketball-Reference~~（BLOCKED）→ ~~SciDB~~（字段不符）→ **官方 API（AES 已解，实际采用）**；密钥若轮换：从前端 bundle 重新提取即可。
 
 ---
 

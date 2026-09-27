@@ -40,6 +40,7 @@ REGULATION_TEAM_MINUTES = {
     League.NBA.value: 240,
     League.ACB.value: 200,
     League.NBL.value: 200,
+    League.CBA.value: 200,    # 4 x 10 (FIBA rules since 2025-26) — Phase 8-E
 }
 OT_STEP_MINUTES = 25  # 5-minute overtime in both regulations modelled here
 
