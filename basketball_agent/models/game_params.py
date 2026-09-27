@@ -59,6 +59,7 @@ LEAGUE_REGULATION_SECONDS: dict[str, float] = {
     "CBA": 2400.0,        # 4 x 10 min — FIBA rules since 2025-26 (Phase 8-E);
                           # earlier CBA seasons (<= 2024-25) were 4 x 12: a
                           # per-season table will be needed for multi-season CBA
+    "BSL": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-F
 }
 
 

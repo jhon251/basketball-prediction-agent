@@ -144,15 +144,24 @@ LiveStats 端点收紧 → nbl.com.au 官方 gamecenter（JS 渲染，抓取成�
 
 ## 6. BSL（土耳其 Basketbol Süper Ligi）
 
-### 主源：TBF/BSL 官方（tbl.org.tr / bsl.org.tr）⛔ 未实测
-- 土耳其篮协主办；大量比赛由 FIBA LiveStats 计分（TBF 与 Genius 合作，🟡 多来源旁证），即 NBL 同款 `data.json` 端点**很可能直接适用**——用户侧取任意一场 BSL 比赛 URL 验证 competition code 即可确认。官方站点为 JS 渲染，内部端点未侦察。
+> **Phase 8-F 修订（2026-09-27，实测后）**：B0 的 LiveStats 路径**数据端实测可用**（competition code=TBF，Genius 托管），但 LiveStats 本身无赛程→id 映射（NBL 8-D 同结论：单场可用、无法枚举）；枚举由 TBF 官方 API 补齐——两者组合即主源。
 
-### 备源 A：RealGM Turkish BSL ✅ 实测（导航确认）
-### 备源 B：Basketball-Reference international/Turkey 🟡（存在，403 反爬）
-### 赛果：Flashscore 🟡（实时/完场比分，box 缺）
+### 实际主源（8-F 起生效）：TBF 官方 API（枚举）+ FIBA LiveStats（box）✅ 实测（全链路打通）
+- **枚举/赛程**：`www.tbf.org.tr/api/Match/get-all-matches-for-filter?ActivityId={id}&TeamId=&Page=1&PageSize=-1&WeekFilter=*` 返回整季每场（主客 TBF 队 id/名称/比分、week 标签、场馆、**genuisId=LiveStats 场次 id**、hasUzatma 加时旗）；赛季清单 `api/League/get-leagues-and-seasons-by-prefix?prefix=bsl`（BSL 历史回溯至 1966-67；2025-26 → activityId=20728, seasonId=172）。
+- **box score**：`fibalivestats.dcd.shared.geniussports.com/data/{genuisId}/data.json`（官方球队级合计 tot_s*：fg=2P+3P 合并、2P/3P 细分、ft、前/后场篮板、助攻、失误、抢断、盖帽、犯规、逐节比分、加时旗）。
+- 网络实测（本机环境）：www.tbf.org.tr 与本机 OpenSSL 的 **TLS 1.3 协商失败（exit 35），强制 `--tlsv1.2 --tls-max 1.2` 即通**；页面路径有 Cloudflare 挑战但 `/api/*` JSON 直答；api.tbf.org.tr 仅承载 SignalR hub；geniussports 主机普通 TLS 可达。
+- 竞赛映射：`N. Hafta`→REGULAR_SEASON；`Playoff Çeyrek Final / Yarı Final / Final`→PLAYOFF。
 
-### 降级方案
-LiveStats 不覆盖 BSL → RealGM → Basketball-Reference → 官方站逆向。
+### 实测缺陷（如实）
+- 2025-26 赛季 262 场中 **1 场 LiveStats 流永久性卡死**（matchId 303916，2025-10-04 Türk Telekom vs Bahçeşehir：定格于第四节 09:37、75-74、152 分钟；2026-09-27 重取逐字节相同；TBF 有终场比分 98-102 但无 box）——按 ACB 先例**显式排除**（适配器 `KNOWN_SOURCE_DEFECTS`，有条件生效：上游若补全则自动恢复入库），入库 261 场。
+- LiveStats `tot_sMinutes` 为 MM:SS 且有 `199:60`（=200:00）类记分员写法；同一 TBF 球队的 LiveStats 3 字母码可跨场漂移（如 Bursaspor 出现 4 种码）——身份锚定 TBF 数字 id，码漂移记录于 `_meta.ls_codes_per_team`。
+
+### 备源 A：RealGM Turkish BSL ❌ 实测 BLOCKED（8-E 已取证，域名级 403）
+### 备源 B：Basketball-Reference international/Turkey ❌ 实测连接层失败（8-E 取证）
+### 赛果：Flashscore 🟡 可达（200）但 box 不满足 schema——未采用
+
+### 降级链（8-F 实测后）
+**TBF API（枚举）+ LiveStats（box）已打通，无需降级**；若上游改版 → Flashscore（仅赛果，需重建 box 路径）→ 官方站逆向。
 
 ---
 
