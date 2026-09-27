@@ -10,6 +10,7 @@ class League(str, Enum):
     CBA = "CBA"
     EUROLEAGUE = "EUROLEAGUE"
     ACB = "ACB"          # Liga Endesa (Spain) — Phase 8-B6
+    NBL = "NBL"          # National Basketball League (Australia) — Phase 8-D
     OTHER = "OTHER"
 
 

@@ -55,6 +55,7 @@ LEAGUE_REGULATION_SECONDS: dict[str, float] = {
     "NBA": 2880.0,        # 4 x 12 min
     "EUROLEAGUE": 2400.0, # 4 x 10 min (FIBA)
     "ACB": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-B6
+    "NBL": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-D
 }
 
 

@@ -164,14 +164,14 @@ def _build_parser() -> argparse.ArgumentParser:
     wb.add_argument("--train-seasons", type=int, default=1,
                     help="fit window before the evaluation window, in NBA seasons "
                          "(1/3/5; 0 skips fitting)")
-    wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE", "ACB"],
+    wb.add_argument("--league", default=None, choices=["NBA", "EUROLEAGUE", "ACB", "NBL"],
                     help="restrict the evaluation window to one league (default: all)")
     wb.add_argument("--n-simulations", type=int, default=100)
 
     cal = sub.add_parser("calibrate",
                          help="per-league calibration: fit on the train window, "
                               "compare frozen vs fitted on a held-out window")
-    cal.add_argument("--league", required=True, choices=["NBA", "EUROLEAGUE", "ACB"])
+    cal.add_argument("--league", required=True, choices=["NBA", "EUROLEAGUE", "ACB", "NBL"])
     cal.add_argument("--cutoff", required=True,
                      help="train window end (ISO, UTC); the fit sees nothing after it")
     cal.add_argument("--test-start", required=True, help="held-out window start (ISO, UTC)")
@@ -202,7 +202,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="audit ONE league's data (ids/namespace/seasons/competition/"
                              "regulation/timezone/missing/FINAL/leakage) — read-only")
     la.add_argument("--league", default="EUROLEAGUE",
-                    choices=["NBA", "EUROLEAGUE", "ACB"])
+                    choices=["NBA", "EUROLEAGUE", "ACB", "NBL"])
     la.add_argument("--leakage-sample", type=int, default=3,
                     help="how many as-of feature computations to audit (0 disables)")
     la.add_argument("--expected-regular", type=int, default=None,
@@ -241,6 +241,10 @@ def _load_any_games_file(path: str, season: str | None = None) -> dict:
         from basketball_agent.data.collectors.euroleague_live import (
             load_euroleague_bundle_file,
         )
+        from basketball_agent.data.collectors.nbl_api import (
+            DATASET_MARKER as NBL_MARKER,
+        )
+        from basketball_agent.data.collectors.nbl_api import load_nbl_bundle_file
 
         # peek at the marker without loading the whole (potentially huge) bundle
         try:
@@ -252,6 +256,8 @@ def _load_any_games_file(path: str, season: str | None = None) -> dict:
             marker = None
         if marker == ACB_MARKER:
             return load_acb_bundle_file(path)
+        if marker == NBL_MARKER:
+            return load_nbl_bundle_file(path)
         return load_euroleague_bundle_file(path)
     from basketball_agent.data.collectors.nba_parquet import load_nba_games_file
 

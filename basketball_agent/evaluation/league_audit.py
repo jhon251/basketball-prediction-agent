@@ -33,11 +33,13 @@ REGULATION_TEAM_MINUTES = {
     League.NBA: 240,          # 4 x 12
     League.EUROLEAGUE: 200,   # 4 x 10
     League.ACB: 200,          # 4 x 10 (Phase 8-B6)
+    League.NBL: 200,          # 4 x 10 (Phase 8-D)
     League.G_LEAGUE: 240,
     League.CBA: 200,
     League.EUROLEAGUE.value: 200,
     League.NBA.value: 240,
     League.ACB.value: 200,
+    League.NBL.value: 200,
 }
 OT_STEP_MINUTES = 25  # 5-minute overtime in both regulations modelled here
 
