@@ -67,12 +67,12 @@ class TestParamTuning:
     def test_logistic_scale_in_candidate_range(self, synthetic_db):
         _, cutoff, _ = _cutoffs(synthetic_db)
         scale = estimate_logistic_scale(Repository(synthetic_db), cutoff, 0.0)
-        assert 8.0 <= scale <= 18.0
+        assert 4.0 <= scale <= 18.0  # C2 grid
 
     def test_shrinkage_k_in_candidates(self, synthetic_db):
         _, cutoff, _ = _cutoffs(synthetic_db)
         k = estimate_shrinkage_k(Repository(synthetic_db), cutoff, 0.0, 11.5)
-        assert k in (0, 2, 5, 10, 20)
+        assert k in (0, 2, 5, 10, 20, 30, 40)  # C2 grid
 
     def test_fit_v1_params_respects_training_window(self, synthetic_db):
         games, cutoff, _ = _cutoffs(synthetic_db)
