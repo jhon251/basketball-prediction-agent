@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 from basketball_agent import __version__
@@ -221,6 +222,26 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="per-season schedule reference, e.g. "
                          "\"2020-21=342,2021-22=306\" (league whose season shape changes)")
 
+    col = sub.add_parser("collector",
+                         help="production data collection (Phase 10-E; per-league "
+                              "isolated, heartbeat/state persisted)")
+    col_sub = col.add_subparsers(dest="col_command", required=True)
+    col_run = col_sub.add_parser("run", help="run one collection pass")
+    col_run.add_argument("--leagues", default=None,
+                         help="comma-separated subset (default: all six)")
+    col_run.add_argument("--ingest", action="store_true",
+                         help="EXPLICIT opt-in: also run the season-refresh gate "
+                              "(fetch -> validate -> ingest -> snapshot) for "
+                              "league-seasons not yet in the core")
+    col_status = col_sub.add_parser("status",
+                                    help="collector heartbeat/state (read-only)")
+    col_status.add_argument("--league", default=None)
+
+    st = sub.add_parser("agent",
+                        help="agent status: collectors, snapshots, data, model")
+    st_sub = st.add_subparsers(dest="st_command")
+    st_sub.add_parser("status", help="full production status report")
+
     ar = sub.add_parser("agent-report",
                         help="read-only Agent orchestration report (9-A..9-E chain; "
                              "no prediction is saved)")
@@ -410,6 +431,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_agent_report(args)
     if args.command == "agent-log":
         return _cmd_agent_log(args)
+    if args.command == "collector":
+        return _cmd_collector(args)
+    if args.command == "agent":
+        return _cmd_agent_status(args)
     if args.command == "evaluate":
         return _cmd_evaluate(args)
     if args.command == "error-analysis":
@@ -616,6 +641,116 @@ def _cmd_agent_report(args) -> int:
                 print(f"Settlement event: record_id={rid} status={status}")
     else:
         print("\n(nothing was saved — agent-report is read-only)")
+    return 0
+
+
+def _cmd_collector(args) -> int:
+    from basketball_agent.collection.scheduler import CollectionScheduler
+    from basketball_agent.config import get_settings
+    from basketball_agent.collection.state import CollectorState
+
+    settings = get_settings()
+    state_dir = Path(settings.db_path).parent / "collector"
+    db, _ = _open_db()
+    scheduler = CollectionScheduler(Repository(db), state_dir)
+    if args.col_command == "status":
+        states = CollectorState(state_dir).all()
+        if args.league:
+            states = {k: v for k, v in states.items() if k == args.league.upper()}
+        print("COLLECTOR STATE (per league; operational telemetry)")
+        for league, s in sorted(states.items()):
+            print(f"  {league:12s} heartbeat={s.get('heartbeat')} "
+                  f"last_status={s.get('last_status')} "
+                  f"last_success={s.get('last_success_at')}")
+            print(f"               last: new={s.get('last_new_games')} "
+                  f"updated={s.get('last_updated_games')} "
+                  f"validation={s.get('last_validation')} "
+                  f"errors={s.get('last_errors') or []}")
+            if s.get("seasons_ingested"):
+                print(f"               seasons ingested: "
+                      f"{[x.get('season') if isinstance(x, dict) else x for x in s['seasons_ingested']]}")
+        if not states:
+            print("  (no collector has run yet)")
+        return 0
+    if args.col_command == "run":
+        leagues = ([x.strip().upper() for x in args.leagues.split(",")]
+                   if args.leagues else None)
+        results = scheduler.run(leagues)
+        print("COLLECTION RUN (per-league isolated; all times UTC)")
+        for r in results:
+            print(f"  {r.summary()}")
+            for err in r.errors:
+                print(f"    error: {err[:300]}")
+        failed = [r for r in results if r.status == "failed"]
+        print(f"pass complete: {len(results) - len(failed)}/{len(results)} "
+              f"leagues OK, {len(failed)} failed")
+
+        if getattr(args, "ingest", False):
+            from basketball_agent.collection.scheduler import refresh_season
+            from basketball_agent.data.snapshots.manager import SnapshotManager
+            settings = get_settings()
+            for league in (leagues or ["NBA", "EUROLEAGUE", "ACB", "NBL",
+                                       "CBA", "BSL"]):
+                print(f"season-refresh gate: {league} ...")
+                try:
+                    rr = refresh_season(Repository(db), state_dir, db,
+                                        league)
+                except Exception as exc:  # noqa: BLE001 — isolation
+                    rr = None
+                    print(f"  {league}: refresh failed "
+                          f"({type(exc).__name__}: {exc})")
+                if rr is not None:
+                    print(f"  {league}: {rr.status} season={rr.season} "
+                          f"games={rr.games_ingested} "
+                          f"snapshot={rr.snapshot_id or '-'}")
+                    for err in rr.errors:
+                        print(f"    note: {err[:300]}")
+        return 0
+    return 2
+
+
+def _cmd_agent_status(args) -> int:
+    from basketball_agent import __version__
+    from basketball_agent.collection.state import CollectorState
+    from basketball_agent.config import get_settings
+    from basketball_agent.data.db.repository import Repository
+    from basketball_agent.data.snapshots.manager import SnapshotManager
+
+    settings = get_settings()
+    db, _ = _open_db()
+    repo = Repository(db)
+    print("PRODUCTION STATUS")
+    print("=" * 60)
+    print(f"model version : {__version__}")
+    print(f"database      : {len(repo.list_games())} games "
+          f"(range {repo.list_games()[0].game_date.date()} .. "
+          f"{repo.list_games()[-1].game_date.date()})")
+    from collections import Counter
+    counts = Counter(g.league.value for g in repo.list_games())
+    print("leagues       : " + ", ".join(
+        f"{k}={v}" for k, v in sorted(counts.items())))
+    latest = _latest_snapshot_id()
+    print(f"snapshot      : {latest or 'none'}")
+    print()
+    print("collector (Phase 10-E):")
+    states = CollectorState(Path(settings.db_path).parent
+                            / "collector").all()
+    if not states:
+        print("  (no collector has run yet — run: collector run)")
+    for league, s in sorted(states.items()):
+        print(f"  {league:12s} heartbeat={s.get('heartbeat')} "
+              f"status={s.get('last_status')} "
+              f"last_success={s.get('last_success_at')}")
+        print(f"               source={s.get('source')}")
+        print(f"               last run: new={s.get('last_new_games')} "
+              f"updated={s.get('last_updated_games')} "
+              f"validation={s.get('last_validation')} "
+              f"errors={s.get('last_errors') or []}")
+    print()
+    print("agent log (Phase 10-B):",
+          f"{sum(1 for _ in (Path(settings.db_path).parent / 'agent_log' / 'decisions.jsonl').open())} decisions"
+          if (Path(settings.db_path).parent / "agent_log" / "decisions.jsonl").exists()
+          else "empty")
     return 0
 
 

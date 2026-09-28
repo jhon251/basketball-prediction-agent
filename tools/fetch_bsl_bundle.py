@@ -263,9 +263,19 @@ def main() -> int:
               f"{len(bundle['tbf_boxes'])} tbf boxes already present")
 
     misses = []
-    no_feed = [m for m in rows if not m.get("genuisId")]
+    # matches without a final score are not played yet — their box data
+    # does not exist and fetching it would burn failing requests
+    def _played(m):
+        return m.get("homeTeam", {}).get("score") not in (None, "") and             m.get("awayTeam", {}).get("score") not in (None, "")
+    no_feed = [m for m in rows
+               if not m.get("genuisId") and _played(m)]
+    skipped_unplayed = sum(1 for m in rows
+                           if not m.get("genuisId") and not _played(m))
+    if skipped_unplayed:
+        print(f"{skipped_unplayed} unplayed matches skipped (no box fetch)")
     if no_feed:
-        print(f"{len(no_feed)} matches without genuisId -> TBF-native boxes")
+        print(f"{len(no_feed)} played matches without genuisId -> "
+              "TBF-native boxes")
     todo = [m for m in rows if m.get("genuisId")]
     for i, m in enumerate(todo, 1):
         gid = int(m["genuisId"])
