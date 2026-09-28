@@ -226,6 +226,8 @@ class TestCLIAdapter:
             as_of = AS_OF.isoformat()
             family = None
             params = None
+            log = None
+            log_settle = False
 
         rc = cli._cmd_agent_report(_Args())
         out = capsys.readouterr().out

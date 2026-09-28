@@ -234,6 +234,30 @@ def _build_parser() -> argparse.ArgumentParser:
     ar.add_argument("--params", default=None,
                     help="apply CALIBRATED parameters from a calibrate --save-params "
                          "JSON file (explicit opt-in)")
+    ar.add_argument("--log", default=None,
+                    help="EXPLICIT opt-in: append the produced AgentBundle to this "
+                         "append-only Decision Log directory (Phase 10-D; without "
+                         "this flag nothing is persisted)")
+    ar.add_argument("--log-settle", action="store_true",
+                    help="after logging, settle the game through the existing "
+                         "settlement chain and append settlement event(s) to the "
+                         "same Decision Log")
+
+    al = sub.add_parser("agent-log",
+                        help="append-only Decision Log operations (Phase 10-D)")
+    al_sub = al.add_subparsers(dest="log_command", required=True)
+    al_verify = al_sub.add_parser("verify",
+                                  help="verify the hash chain (read-only)")
+    al_verify.add_argument("--log-dir", required=True)
+    al_list = al_sub.add_parser("list",
+                                help="list stored decision records (read-only)")
+    al_list.add_argument("--log-dir", required=True)
+    al_list.add_argument("--league", default=None)
+    al_settle = al_sub.add_parser("settle",
+                                  help="settle a FINAL game and append settlement "
+                                       "event(s) for its stored decisions")
+    al_settle.add_argument("game_id")
+    al_settle.add_argument("--log-dir", required=True)
 
     ev = sub.add_parser("evaluate",
                         help="read-only evaluation of settled predictions "
@@ -384,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_settle(args)
     if args.command == "agent-report":
         return _cmd_agent_report(args)
+    if args.command == "agent-log":
+        return _cmd_agent_log(args)
     if args.command == "evaluate":
         return _cmd_evaluate(args)
     if args.command == "error-analysis":
@@ -571,8 +597,64 @@ def _cmd_agent_report(args) -> int:
         return 1
 
     print(format_agent_bundle(bundle))
-    print("\n(nothing was saved — agent-report is read-only)")
+
+    if getattr(args, "log", None):
+        from basketball_agent.agents.decision_log import DecisionLog
+        from basketball_agent.agents.decision_record import DecisionRecordAgent
+        from basketball_agent.agents.persistence import persist, settle_and_log
+        from basketball_agent.agents.risk_analysis import RiskAnalysisAgent
+
+        risk = RiskAnalysisAgent().analyze(bundle.agent_decision)
+        record = DecisionRecordAgent().build(bundle.agent_decision, risk)
+        persisted = persist(bundle.agent_decision, risk, record,
+                            DecisionLog(args.log))
+        print(f"Decision Log: record_id={persisted.record_id} "
+              f"status={persisted.status} (dir: {args.log})")
+        if getattr(args, "log_settle", False):
+            for rid, status, _ in settle_and_log(db, DecisionLog(args.log),
+                                                 bundle.context.game_id):
+                print(f"Settlement event: record_id={rid} status={status}")
+    else:
+        print("\n(nothing was saved — agent-report is read-only)")
     return 0
+
+
+def _cmd_agent_log(args) -> int:
+    from pathlib import Path as _Path
+
+    from basketball_agent.agents.decision_log import DecisionLog
+
+    log = DecisionLog(_Path(args.log_dir))
+    if args.log_command == "verify":
+        ok = log.verify_chain()
+        print(f"hash chain: {'VALID' if ok else 'TAMPERED/INVALID'} "
+              f"({len(log.records())} records)")
+        return 0 if ok else 1
+    if args.log_command == "list":
+        for r in log.filter_records(league=args.league):
+            print(f"{r['record_id']}  {r['as_of']}  {r['league']} "
+                  f"{r['season'] or ''}  {r['game_id']}  "
+                  f"{r['decision_state']}")
+        print(f"total: {len(log.records())} records")
+        return 0
+    if args.log_command == "settle":
+        from basketball_agent.agents.persistence import settle_and_log
+
+        db, _ = _open_db()
+        outcomes = settle_and_log(db, log, args.game_id)
+        if not outcomes:
+            print(f"no stored decision records for game {args.game_id}")
+            return 1
+        for rid, status, settled in outcomes:
+            verdict = "CORRECT" if settled.correct else "WRONG"
+            print(f"Settlement event: record_id={rid} status={status} "
+                  f"score {settled.actual_home_score}-"
+                  f"{settled.actual_away_score} -> {verdict} "
+                  f"(brier={settled.brier:.4f})")
+        return 0
+    return 2
+
+
 def _cmd_predict(args) -> int:
     try:
         db, settings = _open_db()
