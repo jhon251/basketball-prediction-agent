@@ -221,6 +221,20 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="per-season schedule reference, e.g. "
                          "\"2020-21=342,2021-22=306\" (league whose season shape changes)")
 
+    ar = sub.add_parser("agent-report",
+                        help="read-only Agent orchestration report (9-A..9-E chain; "
+                             "no prediction is saved)")
+    ar.add_argument("game_id", help="game id in the data snapshot")
+    ar.add_argument("--as-of", required=True,
+                    help="prediction timestamp (ISO-8601, UTC); the caller owns "
+                         "the information boundary")
+    ar.add_argument("--family", default=None,
+                    choices=["elo", "strength", "simulation"],
+                    help="explicit primary prediction-family override")
+    ar.add_argument("--params", default=None,
+                    help="apply CALIBRATED parameters from a calibrate --save-params "
+                         "JSON file (explicit opt-in)")
+
     return parser
 
 
@@ -329,8 +343,64 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_predict(args)
     if args.command == "settle":
         return _cmd_settle(args)
+    if args.command == "agent-report":
+        return _cmd_agent_report(args)
 
     return 2
+
+
+def _cmd_agent_report(args) -> int:
+    """Read-only Phase 9-E orchestration: prints the full Agent chain
+    (9-A..9-D) without saving anything."""
+    try:
+        db, settings = _open_db()
+        repo = Repository(db)
+        as_of = _parse_as_of(args.as_of)
+        win_config = None
+        calibration = None
+        if getattr(args, "params", None):
+            from basketball_agent.evaluation.param_tuning import load_fitted_params
+
+            fitted = load_fitted_params(args.params)
+            win_config = fitted.to_win_config()
+            from basketball_agent.agents.decision_contract import (
+                CalibrationProvenance,
+            )
+            calibration = CalibrationProvenance(
+                params_file=args.params,
+                fitted_window=(fitted.training_window[0],
+                               fitted.training_window[1]),
+                fitted_at=fitted.fitted_at,
+                validation_logloss=fitted.validation_logloss,
+                boundary_hits=fitted.boundary_hits,
+            )
+        core = PredictionAgent(
+            repo,
+            n_simulations=settings.default_n_simulations,
+            seed=settings.default_seed,
+            decay_lambda=(fitted.decay_lambda if win_config is not None
+                          else settings.decay_lambda),
+            snapshot_id=_latest_snapshot_id(),
+            win_config=win_config,
+            family=getattr(args, "family", None),
+        )
+        from basketball_agent.agents.orchestration import (
+            AgentOrchestrator,
+            format_agent_bundle,
+        )
+
+        bundle = AgentOrchestrator(core, calibration=calibration).orchestrate(
+            args.game_id, as_of=as_of)
+    except PredictionError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 — CLI boundary
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print(format_agent_bundle(bundle))
+    print("\n(nothing was saved — agent-report is read-only)")
+    return 0
 def _cmd_predict(args) -> int:
     try:
         db, settings = _open_db()
