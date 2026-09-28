@@ -163,7 +163,9 @@ def _line_from_log(row: dict, points: int, team_minutes: int) -> dict:
     return line
 
 
-def parse_cba_bundle(bundle: dict) -> dict:
+def parse_cba_bundle(bundle: dict, *, game_seq_start: int = 0) -> dict:
+    """``game_seq_start`` (Phase 10-E.1): collector top-up continuation
+    (see bsl_livestats.parse_bsl_bundle)."""
     if bundle.get("dataset") != DATASET_MARKER:
         raise CBADataError(
             f"not a CBA bundle (expected dataset={DATASET_MARKER!r})"
@@ -291,7 +293,8 @@ def parse_cba_bundle(bundle: dict) -> dict:
         ).replace(tzinfo=_BEIJING)
 
         games.append(Game(
-            game_id=f"CBA{year % 100:02d}-{len(games) + 1:04d}",
+            game_id=(f"CBA{year % 100:02d}-"
+                     f"{len(games) + 1 + game_seq_start:04d}"),
             league=League.CBA, season=season, game_date=game_date,
             home_team_id=home_id, away_team_id=away_id,
             home_score=home_score, away_score=away_score,
@@ -323,6 +326,8 @@ def parse_cba_bundle(bundle: dict) -> dict:
         "availability": [],
         "_meta": {
             "n_games": len(games),
+            "source_ids": [int(dr[1]["scheduleId"]) for dr in day_rows
+                           if dr[1].get("scheduleId") is not None],
             "n_final": sum(1 for g in games if g.status is GameStatus.FINAL),
             "n_dropped_preseason": dropped["preseason"],
             "n_dropped_allstar": dropped["all-star"],

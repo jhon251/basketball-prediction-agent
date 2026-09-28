@@ -165,7 +165,13 @@ class TestValidationAnomaly:
 
 
 class TestSeasonRefreshGate:
-    def test_ingested_season_refused(self, tmp_path):
+    def test_ingested_season_topup_with_dedup(self, scheduled_target,
+                                              tmp_path, monkeypatch):
+        """Top-up on an already-ingested season: only genuinely new games
+        are ingested, ids continue, existing games/rows unchanged."""
+        import json as _json
+        import subprocess as _sp
+
         from basketball_agent.data.db.connection import Database
         from basketball_agent.data.db.repository import Repository
         from basketball_agent.data.schemas.base import (
@@ -192,10 +198,45 @@ class TestSeasonRefreshGate:
         state = CollectorState(tmp_path / "collector")
         state.update("BSL", status="success", source="tbf",
                      season="2026-2027")
-        result = refresh_season(repo, tmp_path / "collector", db, "BSL")
-        # the TBF label "2026-2027" is normalised to the core's "2026-27"
-        assert result.status == "already_ingested"
-        assert "already present" in result.errors[0]
+
+        # synthetic fetcher output: 1 match, already in the core
+        bundle_dir = tmp_path / "bundles"
+        row = {"matchId": 9001, "matchDate": "2026-09-25T19:00:00",
+               "matchDateOnly": "2026-09-25", "matchTime": "19:00",
+               "week": "1. Hafta", "matchStatusId": 1, "hasUzatma": False,
+               "genuisId": "",
+               "homeTeam": {"id": 266001, "name": "A", "score": "90"},
+               "awayTeam": {"id": 266002, "name": "B", "score": "89"}}
+        box1 = _box("A", 90, 35, 65, 8, 25, 12, 16, 10, 30, 40, 15, 12, 5,
+                    2, 19)
+        box2 = _box("B", 89, 32, 62, 9, 27, 16, 22, 11, 28, 39, 14, 13, 6,
+                    1, 20)
+        bundle = {
+            "dataset": "bsl-livestats-v1", "league": "BSL",
+            "season": "2026-2027", "activity_id": 22214, "season_id": 174,
+            "source": "test", "fetched_at": "2026-09-28T00:00:00+00:00",
+            "schedule": [row],
+            "livestats": {},
+            "tbf_boxes": {"9001": {
+                "box_source": "tbf-native", "periodLength": 10,
+                "boxscore_source": "test",
+                "teams": {"1": box1, "2": box2}}}}
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        target = bundle_dir / "bsl_2627_raw.json"
+        target.write_text(_json.dumps(bundle, ensure_ascii=False),
+                          encoding="utf-8")
+
+        # the fetcher subprocess is mocked: rc=0, no output
+        monkeypatch.setattr(_sp, "run",
+                            lambda *a, **k: _sp.CompletedProcess(a[0], 0))
+
+        result = refresh_season(Repository(db), tmp_path / "collector", db,
+                                "BSL", bundle_dir=bundle_dir)
+        # the source game 9001 is already in the core -> deduped, nothing
+        # new to ingest; ids are stable, nothing renumbered
+        assert result.status == "no_new_games"
+        assert result.games_ingested == 1
+        assert repo.get_game("BSL26-0001").home_score == 90  # unchanged
 
     def test_unknown_season_fails_clearly(self, tmp_path):
         from basketball_agent.data.db.connection import Database
@@ -219,3 +260,20 @@ class TestSeasonRefreshGate:
         result = refresh_season(Repository(db), tmp_path / "collector", db,
                                 "NBA")
         assert result.status == "unsupported"
+
+
+def _box(code, pts, fg, fga, fg3, fg3a, ft, fta, orb, drb, trb, ast, tov,
+         stl, blk, pf):
+    """Points identity enforced: fg values are derived from pts when
+    possible by the caller; this helper just packs the row."""
+    """A TBF-native box row with an exact scoring identity."""
+    return {"code": code, "name": code, "shortName": code, "score": pts,
+            "full_score": pts, "tot_sMinutes": "200:00",
+            "tot_sFieldGoalsMade": fg, "tot_sFieldGoalsAttempted": fga,
+            "tot_sThreePointersMade": fg3,
+            "tot_sThreePointersAttempted": fg3a,
+            "tot_sFreeThrowsMade": ft, "tot_sFreeThrowsAttempted": fta,
+            "tot_sReboundsOffensive": orb, "tot_sReboundsDefensive": drb,
+            "tot_sReboundsTotal": trb, "tot_sAssists": ast,
+            "tot_sTurnovers": tov, "tot_sSteals": stl, "tot_sBlocks": blk,
+            "tot_sFoulsPersonal": pf}

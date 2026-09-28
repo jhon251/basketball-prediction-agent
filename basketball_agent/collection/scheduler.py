@@ -225,21 +225,27 @@ class RefreshResult:
 
 def refresh_season(repo: Repository, state_dir, db, league: str,
                    *, season: str | None = None,
-                   n_simulations: int | None = None) -> RefreshResult:
-    """Season-refresh gate: onboard ONE league-season into the Prediction
-    Core through the existing validate -> ingest -> snapshot mechanisms.
+                   bundle_dir: "Path | None" = None) -> RefreshResult:
+    """Season-refresh gate (Phase 10-E, hardened in 10-E.1).
 
-    Gate: the league-season must have ZERO games in the core (first
-    onboarding).  A partially/fully ingested season is refused (game ids
-    are assigned per ingestion pass — incremental top-up is a documented
-    open item).  The fetcher subprocess is the existing, battle-tested
-    tool; its bundle flows through the frozen adapters and validation.
+    * season ABSENT from the core  -> full onboarding through the frozen
+      validate -> ingest -> snapshot path (default id sequence);
+    * season ALREADY in the core   -> safe incremental top-up: the bundle
+      is parsed with ``game_seq_start`` continuing the stored sequence,
+      games whose source id is already in the ledger are dropped (never
+      re-ingested, never renumbered), and score corrections on ingested
+      games are REPORTED (never auto-applied).
+
+    All source_id -> game_id mappings are recorded in the append-only
+    ledger (``collection.ledger.SourceGameLedger``).
     """
     from basketball_agent.config import get_settings
+    from basketball_agent.collection.ledger import SourceGameLedger
     from basketball_agent.collection.state import CollectorState
 
     settings = get_settings()
     state = CollectorState(state_dir)
+    ledger = SourceGameLedger(state_dir)
     st = state.load(league)
     discovered_season = st.get("last_season")
     season = season or discovered_season
@@ -249,79 +255,120 @@ def refresh_season(repo: Repository, state_dir, db, league: str,
                              errors=["no season known for this league; run "
                                      "a discovery pass first"])
 
-    # gate: the season must be absent from the core.  The source label
-    # (e.g. TBF's "2026-2027") is normalised to the adapter's season label
-    # ("2026-27") so the gate compares like with like.
-    from basketball_agent.data.schemas.base import League
-
-    def _norm_season(label: str) -> str:
+    def _norm(label: str) -> str:
         parts = str(label).split("-")
         if len(parts) == 2 and len(parts[1]) == 4:
             return f"{parts[0]}-{parts[1][-2:]}"
         return str(label)
 
+    season_norm = _norm(season)
+    from basketball_agent.data.schemas.base import League
+
     league_enum = League(league)
-    season_norm = _norm_season(season)
-    games = [g for g in repo.list_games(league=league_enum)
-             if g.season == season_norm]
-    if games:
-        season = season_norm
-        return RefreshResult(league=league, season=season,
-                             status="already_ingested",
-                             games_ingested=len(games),
-                             errors=["season already present in the core "
-                                     f"({len(games)} games); incremental "
-                                     "top-up is not supported yet"])
+    games_in_core = [g for g in repo.list_games(league=league_enum)
+                     if g.season == season_norm]
+    top_up = bool(games_in_core)
+    season_prefix = f"{league}{season_norm[:2][-2:]}"
+    season_prefix = f"{league}{season_norm[:4][-2:]}"
+    max_seq = ledger.max_game_seq(league, season_prefix)
 
     args_template = _REFRESH_ARGS.get(league)
     if args_template is None:
-        return RefreshResult(league=league, season=season, status="unsupported",
+        return RefreshResult(league=league, season=season_norm,
+                             status="unsupported",
                              errors=[f"{league} has no automated season "
                                      "refresh (documented manual refresh)"])
 
     import subprocess
 
-    def _repo_root() -> str:
-        return str(Path(settings.db_path).parent.parent)
-
-    out_dir = Path(settings.db_path).parent / "collector" / "bundles" / league
+    out_dir = (Path(bundle_dir) if bundle_dir else
+               Path(settings.db_path).parent / "collector" / "bundles"
+               / league)
     out_dir.mkdir(parents=True, exist_ok=True)
     fmt = {"season": season,
-           "season_value": st.get("last_detail", {}).get(
-               "extra", {}).get("season_value") or season.split("-")[0],
+           "season_value": (st.get("last_detail", {}).get("extra", {})
+                            .get("season_value") or season_norm[:4]),
            "out_dir": str(out_dir),
-           "nbl_year": season.split("-")[0],
-           "el_season": "E" + season.split("-")[0]}
-    cmd = ["./.venv/Scripts/python.exe", f"tools/fetch_{league.lower()}_bundle.py",
+           "nbl_year": season_norm[:4],
+           "el_season": "E" + season_norm[:4]}
+    cmd = ["./.venv/Scripts/python.exe",
+           f"tools/fetch_{league.lower()}_bundle.py",
            *[a.format(**fmt) for a in args_template]]
     proc = subprocess.run(cmd, capture_output=True, timeout=3600,
                           cwd=_repo_root())
     if proc.returncode != 0:
-        return RefreshResult(league=league, season=season, status="failed",
-                             errors=[f"fetcher failed: "
-                                     f"{proc.stderr.decode('utf-8', 'replace')[-400:]}"])
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
+                             errors=["fetcher failed: " +
+                                     proc.stderr.decode("utf-8", "replace")
+                                     [-400:]])
 
-    # locate the produced bundle (newest *_raw.json in the out-dir)
-    bundles = sorted(out_dir.glob("*_raw.json"), key=lambda p: p.stat().st_mtime)
+    bundles = sorted(out_dir.glob("*_raw.json"),
+                     key=lambda p: p.stat().st_mtime)
     if not bundles:
-        return RefreshResult(league=league, season=season, status="failed",
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
                              errors=["fetcher produced no bundle"])
     bundle_path = bundles[-1]
 
-    # frozen validate -> ingest -> snapshot path (mirrors cli ingest)
     from basketball_agent.cli.main import _load_any_games_file
     from basketball_agent.data.collectors.nba_parquet import merge_raw_datasets
-    from basketball_agent.data.db.loader import DataIngestor
-    from basketball_agent.data.validators.parsing import parse_dataset
-    from basketball_agent.agents.validation_agent import DataValidationAgent
-    from basketball_agent.data.snapshots.manager import SnapshotManager
 
     raw = _load_any_games_file(str(bundle_path))
     merged = merge_raw_datasets([raw])
+    source_ids = merged.get("_meta", {}).get("source_ids") or []
+
+    corrections = []
+    if top_up:
+        keep = [i for i, sid in enumerate(source_ids)
+                if str(sid) not in ledger.game_ids(league)]
+        corrections = _detect_corrections(raw, ledger, league, db)
+        merged = _filter_parsed(merged, keep)
+        if not merged["games"]:
+            note = ("all source games already ingested"
+                    + (f"; {len(corrections)} score correction(s) detected "
+                       "(report-only)" if corrections else ""))
+            return RefreshResult(league=league, season=season_norm,
+                                 status="no_new_games",
+                                 games_ingested=len(games_in_core),
+                                 errors=[note])
+
+    from basketball_agent.agents.validation_agent import DataValidationAgent
+    from basketball_agent.data.validators.parsing import parse_dataset
+
     dataset, parse_errors = parse_dataset(merged)
     if parse_errors:
-        return RefreshResult(league=league, season=season, status="failed",
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
                              errors=[f"parse errors: {parse_errors[:3]}"])
+
+    # final dedup: drop games whose game_id is already in the core (never
+    # re-ingest, never duplicate — 10-E requirement 4)
+    existing_ids = {g.game_id for g in repo.list_games(league=league_enum)}
+    merged["games"] = [g for g in merged["games"]
+                       if g["game_id"] not in existing_ids]
+    merged["team_stats"] = [ts for ts in merged["team_stats"]
+                            if ts["game_id"] in
+                            {g["game_id"] for g in merged["games"]}]
+    if not merged["games"]:
+        return RefreshResult(
+            league=league, season=season_norm, status="no_new_games",
+            games_ingested=len(games_in_core),
+            errors=["all source games already ingested"
+                    + (f"; {len(corrections)} score correction(s) "
+                       "detected (report-only)" if corrections else "")])
+
+    dataset, parse_errors = parse_dataset(merged)
+    if parse_errors:
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
+                             errors=[f"re-parse errors after dedup: "
+                                     f"{parse_errors[:3]}"])
+    if not dataset.games:
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
+                             errors=["source produced zero ingestable games "
+                                     "(season may not have started)"])
     game_dates = [g.game_date for g in dataset.games]
     latest = max(game_dates)
     if latest.tzinfo is None:
@@ -329,13 +376,89 @@ def refresh_season(repo: Repository, state_dir, db, league: str,
     validation_now = latest + timedelta(days=1)
     report = DataValidationAgent(now=validation_now).validate(dataset)
     if report.has_errors:
-        return RefreshResult(league=league, season=season, status="failed",
-                             errors=[f"validation errors: {report.errors[:3]}"])
+        return RefreshResult(league=league, season=season_norm,
+                             status="failed",
+                             errors=["validation errors: "
+                                     f"{report.errors[:3]}"])
+
+    from basketball_agent.data.snapshots.manager import SnapshotManager
 
     DataIngestor(db).ingest(merged)
     snapshot = SnapshotManager(settings.snapshots_dir).create(
         db.path, tag=f"collector:{league}")
-    state.mark_season_ingested(league, season, snapshot.snapshot_id)
-    return RefreshResult(league=league, season=season, status="ingested",
+    state.mark_season_ingested(league, season_norm, snapshot.snapshot_id)
+
+    # record source_id -> game_id mappings for the ingested games
+    if top_up:
+        new_sids = [str(sid) for sid in source_ids
+                        if str(sid) not in ledger.game_ids(league)]
+    else:
+        new_sids = [str(sid) for sid in source_ids]
+    for sid, game in zip(new_sids, dataset.games):
+        ledger.record(league, season_norm, sid, game.game_id)
+
+    return RefreshResult(league=league, season=season_norm, status="ingested",
                          games_ingested=len(dataset.games),
                          snapshot_id=snapshot.snapshot_id)
+
+
+def _detect_corrections(raw: dict, ledger, league: str, db) -> list[dict]:
+    """Score corrections: an ingested source game whose CURRENT source
+    scores differ from the stored ones.  Report-only."""
+    from basketball_agent.config import get_settings
+    from basketball_agent.data.db.connection import Database
+
+    corrections = []
+    if league != "BSL":
+        return corrections
+    settings = get_settings()
+    db = Database(settings.db_path)
+    db.initialize()
+    for m in raw.get("schedule") or []:
+        sid = str(m.get("matchId"))
+        game_id = ledger.game_id_for(league, sid)
+        if game_id is None:
+            continue
+        hs = (m.get("homeTeam") or {}).get("score")
+        as_ = (m.get("awayTeam") or {}).get("score")
+        if hs is None or as_ is None:
+            continue
+        row = db.connect().__enter__().execute(
+            "SELECT home_score, away_score FROM games WHERE game_id = ?",
+            (game_id,)).fetchone()
+        if row and (int(hs), int(as_)) != (row["home_score"],
+                                           row["away_score"]):
+            corrections.append({
+                "source_id": sid, "game_id": game_id,
+                "stored": [row["home_score"], row["away_score"]],
+                "source_now": [int(hs), int(as_)]})
+    return corrections
+
+
+def _filter_parsed(merged: dict, keep_positions: list[int]) -> dict:
+    """Keep only the parsed games at the given source_ids positions (and
+    their team_stats)."""
+    sid_list = merged.get("_meta", {}).get("source_ids") or []
+    keep = [i for i in keep_positions if i < len(sid_list)]
+    keep_sids = {sid_list[i] for i in keep}
+    games = [g for i, g in enumerate(merged.get("games") or [])
+             if i < len(sid_list) and sid_list[i] in keep_sids]
+    keep_gids = {g["game_id"] for g in games}
+    team_stats = [ts for ts in merged.get("team_stats") or []
+                  if ts.get("game_id") in keep_gids]
+    out = {k: list(v) for k, v in merged.items()
+           if k in ("games", "team_stats", "teams", "players",
+                    "player_stats", "availability")}
+    out["games"] = games
+    out["team_stats"] = team_stats
+    meta = dict(merged.get("_meta", {}))
+    meta["n_games"] = len(games)
+    meta["filtered_top_up"] = True
+    out["_meta"] = meta
+    return out
+
+
+def _repo_root() -> str:
+    from basketball_agent.config import get_settings
+    from pathlib import Path as _P
+    return str(_P(get_settings().db_path).parent.parent)

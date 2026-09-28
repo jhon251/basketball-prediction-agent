@@ -118,12 +118,36 @@ CLUB_ID_CONTINUITY_2024_25: dict[int, int] = {
 }
 
 
+#: Phase 10-E.1: 2026-27 club identities verified against the 2025-26
+#: canonical ids.  Evidence: the official TBF team names of both seasons
+#: (from the ingested schedule rows).  Exact base-club matches only —
+#: sponsor names changed on Beşiktaş (Gain -> none), Fenerbahçe
+#: (Beko -> Tarfin) and Galatasaray (none -> MCT Technic), each the only
+#: club of that name in the league.  Bordo Bandırma (Pizzabulls),
+#: Çayirova Belediyesi and Yukatel Denizli Basket are promoted/new or
+#: uncertain-relocation clubs — deliberately UNMAPPED (never guessed).
+CLUB_ID_CONTINUITY_2026_27: dict[int, int] = {
+    265990: 246936,  # Anadolu Efes
+    265991: 246960,  # Bahçeşehir Koleji
+    265992: 246961,  # Beşiktaş
+    265995: 246972,  # Tofaş
+    266025: 246965,  # Fenerbahçe (Beko -> Tarfin)
+    266026: 246966,  # Galatasaray MCT Technic
+    266027: 246967,  # Karşıyaka
+    266029: 246973,  # Trabzonspor
+    266030: 246974,  # Türk Telekom
+    266048: 246971,  # Aliağa Petkim Spor
+    266176: 246962,  # Bursaspor Basketbol
+}
+
+
 def resolve_team(team_id: Any, season: str | None = None) -> str:
     """TBF numeric team id -> stored id (``BSL-`` prefixed).
 
     With a ``season`` given, per-season club ids are mapped to the
-    canonical (2025-26) id of the same club (Phase 8-H) so that
-    cross-season history links; without a season the raw id is used.
+    canonical id of the same club (Phase 8-H: 2024-25 -> 2025-26;
+    Phase 10-E.1: 2026-27 -> 2025-26) so that cross-season history
+    links; without a season the raw id is used.
     """
     text = str(team_id or "").strip()
     if not text.isdigit() or not 4 <= len(text) <= 9:
@@ -131,6 +155,8 @@ def resolve_team(team_id: Any, season: str | None = None) -> str:
     numeric = int(text)
     if season == "2024-25":
         numeric = CLUB_ID_CONTINUITY_2024_25.get(numeric, numeric)
+    elif season == "2026-27":
+        numeric = CLUB_ID_CONTINUITY_2026_27.get(numeric, numeric)
     return f"BSL-{numeric}"
 
 
@@ -257,7 +283,11 @@ def _line_from_ls(t: dict, points: int, minutes: int) -> dict:
     return line
 
 
-def parse_bsl_bundle(bundle: dict) -> dict:
+def parse_bsl_bundle(bundle: dict, *, game_seq_start: int = 0) -> dict:
+    """``game_seq_start`` (Phase 10-E.1): when the collector tops up an
+    already-ingested season, ids continue after the stored sequence so
+    earlier games are never renumbered; the default (0) is the frozen
+    full-season behavior."""
     if bundle.get("dataset") != DATASET_MARKER:
         raise BSLDataError(
             f"not a BSL bundle (expected dataset={DATASET_MARKER!r})"
@@ -287,7 +317,8 @@ def parse_bsl_bundle(bundle: dict) -> dict:
 
     for row in schedule:
         game_seq = len(games) + 1
-        game_id = f"BSL{year % 100:02d}-{game_seq:04d}"
+        game_id = (f"BSL{year % 100:02d}-"
+                   f"{game_seq + game_seq_start:04d}")
         competition = _competition_for(row.get("week"))
         status, home_score, away_score = _status_and_scores(row)
         if status is None:
@@ -422,6 +453,8 @@ def parse_bsl_bundle(bundle: dict) -> dict:
             "n_box_livestats": box_counts["livestats"],
             "n_box_tbf_native": box_counts["tbf-native"],
             "n_overtime_games": ot_games,
+            "source_ids": [int(row["matchId"]) for row in schedule
+                           if row.get("matchId") is not None],
             "team_minutes_drifted": minutes_drifted,
             "possessions_estimated_for": estimated,
             "ls_codes_per_team": {k: sorted(v) for k, v in team_ls_codes.items()},

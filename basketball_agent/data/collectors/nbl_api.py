@@ -150,7 +150,9 @@ def _line_from_totals(row: dict, points: int) -> dict:
     return line
 
 
-def parse_nbl_bundle(bundle: dict) -> dict:
+def parse_nbl_bundle(bundle: dict, *, game_seq_start: int = 0) -> dict:
+    """``game_seq_start`` (Phase 10-E.1): collector top-up continuation
+    (see bsl_livestats.parse_bsl_bundle)."""
     if bundle.get("dataset") != DATASET_MARKER:
         raise NBLDataError(
             f"not an NBL bundle (expected dataset={DATASET_MARKER!r})"
@@ -187,7 +189,7 @@ def parse_nbl_bundle(bundle: dict) -> dict:
             continue
 
         mid = str(cal["id"])
-        game_id = f"NBL{year % 100:02d}-{seq + 1:04d}"
+        game_id = f"NBL{year % 100:02d}-{seq + 1 + game_seq_start:04d}"
         seq += 1
 
         status = _status_for(cal)
