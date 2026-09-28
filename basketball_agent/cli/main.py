@@ -115,6 +115,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="apply CALIBRATED parameters from a calibrate --save-params "
                         "JSON file (explicit opt-in; without it the frozen defaults "
                         "are used)")
+    p.add_argument("--family", default=None,
+                   choices=["elo", "strength", "simulation"],
+                   help="explicit primary prediction-family override (Phase 8-K; "
+                        "default: the league's configured family, which is "
+                        "simulation for all current leagues). 'ensemble' is an "
+                        "experimental layer available only programmatically with "
+                        "explicit weights")
 
     st = sub.add_parser("settle", help="settle saved predictions for a FINAL game (spec §33)")
     st.add_argument("game_id", help="FINAL game whose saved predictions should be settled")
@@ -351,6 +358,7 @@ def _cmd_predict(args) -> int:
                           else settings.decay_lambda),
             snapshot_id=_latest_snapshot_id(),
             win_config=win_config,
+            family=getattr(args, "family", None),
         )
         prediction = agent.predict(args.game_id, as_of=as_of)
     except PredictionError as exc:
@@ -368,6 +376,8 @@ def _cmd_predict(args) -> int:
 
     if params_note:
         print(params_note)
+    print(f"Primary family: {prediction.primary_family} "
+          f"(source: {prediction.primary_family_source})")
     print(format_report(prediction, team_names))
 
     if args.save:

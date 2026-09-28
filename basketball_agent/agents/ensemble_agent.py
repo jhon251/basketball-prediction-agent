@@ -1,4 +1,4 @@
-"""Ensemble Agent (spec §21).
+"""Ensemble Agent (spec §21) — EXPERIMENTAL / DIAGNOSTIC layer (Phase 8-K).
 
 Combines Elo / team strength / simulation probabilities with weights that
 are TRAINED on historical data (walk-forward backtest, grid search
@@ -6,6 +6,16 @@ minimizing log loss on the training window) — never a hand-picked average,
 and never an LLM judgment.  The fit is intentionally transparent and
 deterministic; if the simulation adds nothing on the training window, the
 weights will honestly reflect that.
+
+Phase 8-K positioning (evidence: PHASE8_J_ARCHITECTURE_AUDIT.md): this
+layer is EXPERIMENTAL/DIAGNOSTIC, not a production family.  The default
+weights ``(0, 0, 1)`` mean the primary probability IS the simulation win
+rate — they are NOT a three-model blend, and the ``ensemble`` name must
+not be read as one.  Production primary probabilities are routed by the
+explicit per-league family configuration (``agents.family_config``);
+reaching this layer's combination in production requires passing explicit
+``EnsembleWeights`` (opt-in).  No weight refitting is planned without a
+new pre-registered protocol.
 """
 from __future__ import annotations
 
