@@ -235,6 +235,28 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="apply CALIBRATED parameters from a calibrate --save-params "
                          "JSON file (explicit opt-in)")
 
+    ev = sub.add_parser("evaluate",
+                        help="read-only evaluation of settled predictions "
+                             "(Phase 10-A; league/season/window filters)")
+    ev.add_argument("--league", default=None)
+    ev.add_argument("--season", default=None)
+    ev.add_argument("--window-start", default=None, help="ISO-8601 (UTC)")
+    ev.add_argument("--window-end", default=None,
+                    help="historical cutoff (exclusive, ISO-8601 UTC)")
+    ev.add_argument("--per-model", action="store_true",
+                    help="also run the frozen walk-forward engine for "
+                         "per-model metrics on the window (explicit windows "
+                         "required; slow on large windows)")
+
+    ea = sub.add_parser("error-analysis",
+                        help="read-only error slices over settled predictions "
+                             "(Phase 10-A)")
+    ea.add_argument("--league", default=None)
+    ea.add_argument("--season", default=None)
+    ea.add_argument("--window-start", default=None, help="ISO-8601 (UTC)")
+    ea.add_argument("--window-end", default=None,
+                    help="historical cutoff (exclusive, ISO-8601 UTC)")
+
     return parser
 
 
@@ -345,8 +367,91 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_settle(args)
     if args.command == "agent-report":
         return _cmd_agent_report(args)
+    if args.command == "evaluate":
+        return _cmd_evaluate(args)
+    if args.command == "error-analysis":
+        return _cmd_error_analysis(args)
 
     return 2
+
+
+def _eval_filter(args):
+    from basketball_agent.evaluation.settled_evaluation import EvaluationFilter
+
+    return EvaluationFilter(
+        league=args.league, season=args.season,
+        window_start=(_parse_as_of(args.window_start)
+                      if args.window_start else None),
+        window_end=(_parse_as_of(args.window_end)
+                    if args.window_end else None))
+
+
+def _print_slice_metrics(title: str, slices: dict) -> None:
+    print(title)
+    for name, m in slices.items():
+        insuff = "" if m.sufficient else "  [SMALL SAMPLE — descriptive only]"
+        print(f"  {name:28s} n={m.n:4d} acc={m.accuracy} ll={m.log_loss} "
+              f"brier={m.brier} ece={m.ece} margin_mae={m.margin_mae} "
+              f"total_mae={m.total_mae}{insuff}")
+    if not slices:
+        print("  (no settled records)")
+
+
+def _cmd_evaluate(args) -> int:
+    from basketball_agent.evaluation.settled_evaluation import (
+        SettlementEvaluator, per_model_evaluation,
+    )
+
+    db, _ = _open_db()
+    ev = SettlementEvaluator(db)
+    flt = _eval_filter(args)
+    overall = ev.evaluate(flt)
+    print("EVALUATION (settled predictions; read-only)")
+    print(f"  overall: n={overall.n} acc={overall.accuracy} "
+          f"logloss={overall.log_loss} brier={overall.brier} ece={overall.ece} "
+          f"margin_mae={overall.margin_mae} total_mae={overall.total_mae}"
+          + ("" if overall.sufficient else
+             f"  [SMALL SAMPLE — descriptive only: {overall.note}]"))
+    _print_slice_metrics("by league:", ev.evaluate_by_league(flt))
+    _print_slice_metrics("by season:", ev.evaluate_by_season(flt))
+    disc = ev.model_disagreement_slices(flt)
+    print(f"model disagreement over settled records: available="
+          f"{disc['available']} ({disc['reason']})")
+    if args.per_model:
+        if not args.window_start or not args.window_end:
+            print("per-model evaluation requires --window-start and "
+                  "--window-end", file=sys.stderr)
+            return 1
+        from basketball_agent.data.db.repository import Repository
+        from basketball_agent.data.schemas.base import League
+        repo = Repository(db)
+        league = League(args.league) if args.league in League.__members__ else None
+        per_model = per_model_evaluation(
+            repo, _parse_as_of(args.window_start),
+            _parse_as_of(args.window_end), league=league)
+        print("per-model (frozen window-backtest engine, frozen defaults):")
+        for model, m in per_model.items():
+            print(f"  {model:12s} n={m.get('n_win_prob')} acc={m.get('accuracy')} "
+                  f"ll={m.get('log_loss')} brier={m.get('brier_score')} "
+                  f"ece={m.get('ece')} margin_mae={m.get('margin_mae')} "
+                  f"total_mae={m.get('total_mae')}")
+    return 0
+
+
+def _cmd_error_analysis(args) -> int:
+    from basketball_agent.evaluation.settled_evaluation import SettlementEvaluator
+
+    db, _ = _open_db()
+    ev = SettlementEvaluator(db)
+    flt = _eval_filter(args)
+    print("ERROR ANALYSIS (settled predictions; read-only; every slice "
+          "carries its sample count)")
+    _print_slice_metrics("fixed slices:", ev.error_slices(flt))
+    _print_slice_metrics("calibration drift (settlement half-year):",
+                         ev.calibration_drift(flt))
+    disc = ev.model_disagreement_slices(flt)
+    print(f"model disagreement: available={disc['available']} ({disc['reason']})")
+    return 0
 
 
 def _cmd_agent_report(args) -> int:
