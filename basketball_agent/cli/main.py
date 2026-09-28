@@ -247,6 +247,16 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="also run the frozen walk-forward engine for "
                          "per-model metrics on the window (explicit windows "
                          "required; slow on large windows)")
+    ev.add_argument("--source", default="settled",
+                    choices=["settled", "decision-log"],
+                    help="evidence source: settled predictions (10-A) or "
+                         "the append-only Decision Log (10-B real Agent "
+                         "history; joined with settlement events at "
+                         "evaluation time)")
+    ev.add_argument("--log-dir", default=None,
+                    help="Decision Log directory (default: storage/agent_log)")
+    ev.add_argument("--family", default=None,
+                    help="filter by primary family (decision-log source)")
 
     ea = sub.add_parser("error-analysis",
                         help="read-only error slices over settled predictions "
@@ -256,6 +266,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ea.add_argument("--window-start", default=None, help="ISO-8601 (UTC)")
     ea.add_argument("--window-end", default=None,
                     help="historical cutoff (exclusive, ISO-8601 UTC)")
+    ea.add_argument("--source", default="settled",
+                    choices=["settled", "decision-log"],
+                    help="evidence source (10-A settled or 10-B decision log)")
+    ea.add_argument("--log-dir", default=None,
+                    help="Decision Log directory (default: storage/agent_log)")
+    ea.add_argument("--family", default=None,
+                    help="filter by primary family (decision-log source)")
 
     return parser
 
@@ -398,6 +415,35 @@ def _print_slice_metrics(title: str, slices: dict) -> None:
 
 
 def _cmd_evaluate(args) -> int:
+    from pathlib import Path as _Path
+
+    if getattr(args, "source", "settled") == "decision-log":
+        from basketball_agent.agents.decision_log import DecisionLog
+        from basketball_agent.evaluation.log_evaluation import (
+            DecisionLogEvaluator, LogEvaluationFilter,
+        )
+
+        log_dir = args.log_dir or _Path("storage/agent_log")
+        ev = DecisionLogEvaluator(DecisionLog(log_dir))
+        flt = LogEvaluationFilter(
+            league=args.league, season=args.season, family=args.family,
+            window_start=args.window_start, window_end=args.window_end)
+        out = ev.evaluate(flt, by_model=True)
+        print("EVALUATION (real Agent history; Decision Log x Settlement "
+              "Log join — evidence_kind: real_agent_history)")
+        s = out["primary"]
+        print(f"  primary: n={s.n} acc={s.accuracy} logloss={s.log_loss} "
+              f"brier={s.brier} ece={s.ece} margin_mae={s.margin_mae} "
+              f"total_mae={s.total_mae}"
+              + ("" if s.sufficient else "  [SMALL SAMPLE — descriptive only]"))
+        print("  by model (stored probabilities, no re-run):")
+        for model, m in out["by_model"].items():
+            print(f"  {model:12s} n={m.n:4d} acc={m.accuracy} ll={m.log_loss} "
+                  f"brier={m.brier} ece={m.ece}")
+        _print_slice_metrics("slices:", out["slices"])
+        print(f"join stats: {out['join_stats']}")
+        return 0
+
     from basketball_agent.evaluation.settled_evaluation import (
         SettlementEvaluator, per_model_evaluation,
     )
@@ -439,6 +485,27 @@ def _cmd_evaluate(args) -> int:
 
 
 def _cmd_error_analysis(args) -> int:
+    from pathlib import Path as _Path
+
+    if getattr(args, "source", "settled") == "decision-log":
+        from basketball_agent.agents.decision_log import DecisionLog
+        from basketball_agent.evaluation.log_evaluation import (
+            DecisionLogEvaluator, LogEvaluationFilter,
+        )
+
+        log_dir = args.log_dir or _Path("storage/agent_log")
+        ev = DecisionLogEvaluator(DecisionLog(log_dir))
+        flt = LogEvaluationFilter(
+            league=args.league, season=args.season, family=args.family,
+            window_start=args.window_start, window_end=args.window_end)
+        rows = ev.joined(flt)
+        slices = ev.slices(rows)
+        print("ERROR ANALYSIS (real Agent history; Decision Log x Settlement "
+              "Log — every slice carries its sample count)")
+        _print_slice_metrics("slices:", slices)
+        print(f"join stats: {ev.last_join_stats}")
+        return 0
+
     from basketball_agent.evaluation.settled_evaluation import SettlementEvaluator
 
     db, _ = _open_db()
