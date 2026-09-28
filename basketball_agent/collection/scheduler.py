@@ -124,6 +124,14 @@ class CollectionScheduler:
                     "extra": listing, "manual_refresh": True}
         raise RuntimeError(f"no collector registered for league {league!r}")
 
+    # ------------------------------------------------------------ row access
+    def discover_rows(self, league: str) -> dict:
+        """Light discovery for one league: returns {source, season, rows}."""
+        return self._discover(league)
+
+    def last_season(self, league: str) -> str | None:
+        return self.state.load(league).get("last_season")
+
     # ----------------------------------------------------------------- run
     def run(self, leagues: list[str] | None = None,
             *, as_of: datetime | None = None) -> list[CollectionResult]:

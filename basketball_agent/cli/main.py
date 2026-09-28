@@ -242,6 +242,20 @@ def _build_parser() -> argparse.ArgumentParser:
     st_sub = st.add_subparsers(dest="st_command")
     st_sub.add_parser("status", help="full production status report")
 
+    prod = sub.add_parser("production",
+                          help="production auto-prediction loop (Phase 10-E.2: "
+                               "collect -> predict -> log -> settle)")
+    prod_sub = prod.add_subparsers(dest="prod_command", required=True)
+    prod_run = prod_sub.add_parser("run", help="run one production pass")
+    prod_run.add_argument("--leagues", default=None,
+                          help="comma-separated subset (default: all six)")
+    prod_run.add_argument("--max-predictions", type=int, default=None,
+                          help="cap predictions per pass (batching)")
+    prod_run.add_argument("--skip-collect", action="store_true",
+                          help="skip the collection discovery pass")
+    prod_status = prod_sub.add_parser("status",
+                                      help="production loop state (read-only)")
+
     ar = sub.add_parser("agent-report",
                         help="read-only Agent orchestration report (9-A..9-E chain; "
                              "no prediction is saved)")
@@ -433,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_agent_log(args)
     if args.command == "collector":
         return _cmd_collector(args)
+    if args.command == "production":
+        return _cmd_production(args)
     if args.command == "agent":
         return _cmd_agent_status(args)
     if args.command == "evaluate":
@@ -752,6 +768,61 @@ def _cmd_agent_status(args) -> int:
           if (Path(settings.db_path).parent / "agent_log" / "decisions.jsonl").exists()
           else "empty")
     return 0
+
+
+def _cmd_production(args) -> int:
+    from datetime import datetime, timezone
+
+    from basketball_agent.agents.decision_log import DecisionLog
+    from basketball_agent.agents.prediction_agent import PredictionAgent
+    from basketball_agent.collection.production_loop import ProductionLoop
+    from basketball_agent.collection.scheduler import CollectionScheduler
+    from basketball_agent.collection.state import CollectorState
+    from pathlib import Path as _Path
+
+    settings = get_settings()
+    db, _ = _open_db()
+    state_dir = _Path(settings.db_path).parent / "collector"
+    scheduler = CollectionScheduler(Repository(db), state_dir)
+    core = PredictionAgent(
+        Repository(db),
+        n_simulations=settings.default_n_simulations,
+        seed=settings.default_seed,
+        decay_lambda=settings.decay_lambda,
+        snapshot_id=_latest_snapshot_id())
+    log = DecisionLog(_Path(settings.db_path).parent / "agent_log")
+    loop = ProductionLoop(db, scheduler, core, log,
+                          CollectorState(state_dir), state_dir=state_dir)
+    now = datetime.now(timezone.utc)
+
+    if args.prod_command == "run":
+        leagues = ([x.strip().upper() for x in args.leagues.split(",")]
+                   if args.leagues else None)
+        report = loop.run(leagues, now=now,
+                          max_predictions=args.max_predictions,
+                          skip_collection=getattr(args, "skip_collect",
+                                                  False))
+        print("PRODUCTION PASS (collect -> predict -> log -> settle)")
+        for p in report.predicted:
+            print(f"  predicted: {p['game_id']} [{p['league']}] "
+                  f"prob={p['prob_home']:.4f} record={p['record_id']} "
+                  f"({p['log_status']})")
+        for s in report.settled:
+            print(f"  settled: {s['game_id']} record={s['record_id']} "
+                  f"correct={s['correct']}")
+        for e in report.errors:
+            print(f"  error: {e}")
+        print(f"pass complete: {report.summary()}")
+        return 0
+    if args.prod_command == "status":
+        state = CollectorState(state_dir).load("LOOP")
+        print("PRODUCTION LOOP STATE")
+        for k in ("heartbeat", "last_status", "last_new_games",
+                  "last_updated_games", "last_loop_summary"):
+            print(f"  {k}: {state.get(k)}")
+        print(f"  last_errors: {state.get('last_errors') or []}")
+        return 0
+    return 2
 
 
 def _cmd_agent_log(args) -> int:

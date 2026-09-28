@@ -116,8 +116,10 @@ def bsl_matches(activity_id: int, season_id: int) -> list[dict]:
         rows.append({
             "source_id": str(r.get("matchId")),
             "date": (r.get("matchDateOnly") or "")[:10],
+            "match_time": (r.get("matchTime") or "00:00"),
             "status_raw": r.get("matchStatusId"),
             "home": home.get("name"), "away": away.get("name"),
+            "home_id": home.get("id"), "away_id": away.get("id"),
             "home_score": home.get("score"), "away_score": away.get("score"),
             "has_ot": bool(r.get("hasUzatma")),
         })
@@ -136,6 +138,7 @@ def nbl_matches(year: int) -> list[dict]:
             "date": ((m.get("start_time_datetime") or "")[:10]),
             "status_raw": m.get("phase"),
             "home": home.get("name"), "away": away.get("name"),
+            "home_id": home.get("id"), "away_id": away.get("id"),
             "home_score": m.get("home_score"), "away_score": m.get("away_score"),
         })
     return rows

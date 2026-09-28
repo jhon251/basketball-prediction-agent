@@ -162,6 +162,10 @@ class DecisionLog:
                 return r
         return None
 
+    def records_for_game(self, game_id: str) -> list[dict]:
+        """All decision records for one game (any as_of version)."""
+        return [r for r in self.records() if r["game_id"] == game_id]
+
     def settlements_for(self, record_id: str) -> list[dict]:
         return [s for s in self.settlements()
                 if s["record_id"] == record_id]
