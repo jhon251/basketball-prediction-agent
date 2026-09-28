@@ -46,6 +46,13 @@ REGULATION_TEAM_MINUTES = {
 }
 OT_STEP_MINUTES = 25  # 5-minute overtime in both regulations modelled here
 
+#: per-season regulation overrides (Phase 8-H): the CBA played 4 x 12
+#: (240 team-minutes) through 2024-25 and moved to FIBA 4 x 10 (200) in
+#: 2025-26 — verified against the official per-game minutes field.
+REGULATION_TEAM_MINUTES_BY_SEASON: dict[tuple[str, str], int] = {
+    ("CBA", "2024-25"): 240,
+}
+
 EUROLEAGUE_ID_RE = re.compile(r"^E\d{4}-\d{4}$")
 ACB_ID_RE = re.compile(r"^ACB\d{4}-\d{6}$")
 SEASON_LABEL_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -232,12 +239,16 @@ def audit_league(
     # 5) regulation minutes -------------------------------------------------
     stats = [ts for ts in repo.list_team_stats()
              if any(g.game_id == ts.game_id for g in games)]
+    season_of = {g.game_id: g.season for g in games}
     expected = _regulation_minutes(league)
     hard_violations: list[str] = []
     source_quirks: list[str] = []
     ot_games = 0
     for ts in stats:
-        delta = ts.minutes - expected
+        ts_season = season_of.get(ts.game_id)
+        expected_for = REGULATION_TEAM_MINUTES_BY_SEASON.get(
+            (league.value, ts_season), expected)
+        delta = ts.minutes - expected_for
         if delta == 0:
             continue
         if delta > 0 and delta % OT_STEP_MINUTES == 0:

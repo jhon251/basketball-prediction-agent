@@ -84,3 +84,32 @@ class TestGamePredictionParams:
         _, p1 = make_params(scheduled_target)
         _, p2 = make_params(scheduled_target)
         assert p1 == p2
+
+
+class TestRegulationSecondsFor:
+    """Phase 8-H: per-season regulation overrides (CBA 48->40 minute switch)."""
+
+    def test_cba_2025_26_is_fiba_40(self):
+        from basketball_agent.models.game_params import regulation_seconds_for
+        assert regulation_seconds_for("CBA", "2025-26") == 2400.0
+
+    def test_cba_2024_25_was_48_minutes(self):
+        from basketball_agent.models.game_params import regulation_seconds_for
+        assert regulation_seconds_for("CBA", "2024-25") == 2880.0
+
+    def test_other_leagues_unaffected(self):
+        from basketball_agent.models.game_params import regulation_seconds_for
+        assert regulation_seconds_for("NBA", "2024-25") == 2880.0
+        assert regulation_seconds_for("BSL", "2024-25") == 2400.0
+        assert regulation_seconds_for("CBA", None) == 2400.0
+        assert regulation_seconds_for(None, "2024-25") == 2880.0
+
+    def test_build_game_params_uses_target_season(self, scheduled_target):
+        # the default fixture is an NBA game -> 2880 s regardless of season
+        _, params = make_params(scheduled_target)
+        assert params.regulation_seconds == 2880.0
+
+    def test_game_features_carry_target_season(self, scheduled_target):
+        features, _ = make_params(scheduled_target)
+        assert features.game_season is not None
+        assert features.game_league is not None

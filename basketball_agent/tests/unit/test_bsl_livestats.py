@@ -275,3 +275,60 @@ class TestBSLIngestGate:
         assert game.league is League.BSL
         assert game.competition is Competition.REGULAR_SEASON
         assert game.home_score == 91 and game.away_score == 87
+
+
+class TestClubIdContinuity:
+    """Phase 8-H: TBF ids are per-season; 2024-25 clubs map to the
+    canonical 2025-26 ids so cross-season history links."""
+
+    def test_2024_25_ids_are_remapped(self):
+        assert resolve_team(164374, "2024-25") == "BSL-246936"  # Anadolu Efes
+        assert resolve_team(164392, "2024-25") == "BSL-246974"  # Türk Telekom
+
+    def test_single_season_clubs_keep_their_ids(self):
+        assert resolve_team(164379, "2024-25") == "BSL-164379"  # Darüşşafaka (relegated)
+        assert resolve_team(164393, "2024-25") == "BSL-164393"  # SEMT77 Yalovaspor (relegated)
+
+    def test_2025_26_and_seasonless_calls_unaffected(self):
+        assert resolve_team(246936, "2025-26") == "BSL-246936"
+        assert resolve_team(246936) == "BSL-246936"
+        assert resolve_team(164374) == "BSL-164374"
+
+    def test_2024_25_bundle_rows_join_across_seasons(self):
+        bundle = _bundle()
+        row = copy.deepcopy(bundle["schedule"][0])
+        row["matchId"] = 235591
+        row["season"] = "2024-2025"
+        row["genuisId"] = ""
+        row["week"] = "5. Hafta"
+        row["matchDate"] = "2024-11-10T17:00:00"
+        row["homeTeam"] = {"id": 164374, "name": "ANADOLU EFES", "score": "90"}
+        row["awayTeam"] = {"id": 164377, "name": "BURSASPOR YÖRSAN", "score": "76"}
+        box = {
+            "box_source": "tbf-native",
+            "teams": {
+                "1": {"code": "", "name": "ANADOLU EFES", "score": 90,
+                      "tot_sMinutes": "200:00", "tot_sFieldGoalsMade": 32,
+                      "tot_sFieldGoalsAttempted": 59, "tot_sThreePointersMade": 7,
+                      "tot_sThreePointersAttempted": 26, "tot_sFreeThrowsMade": 19,
+                      "tot_sFreeThrowsAttempted": 25, "tot_sReboundsOffensive": 10,
+                      "tot_sReboundsDefensive": 32, "tot_sReboundsTotal": 42,
+                      "tot_sAssists": 27, "tot_sTurnovers": 15, "tot_sSteals": 3,
+                      "tot_sBlocks": 3, "tot_sFoulsPersonal": 20},
+                "2": {"code": "", "name": "BURSASPOR", "score": 76,
+                      "tot_sMinutes": "200:00", "tot_sFieldGoalsMade": 26,
+                      "tot_sFieldGoalsAttempted": 69, "tot_sThreePointersMade": 7,
+                      "tot_sThreePointersAttempted": 31, "tot_sFreeThrowsMade": 17,
+                      "tot_sFreeThrowsAttempted": 22, "tot_sReboundsOffensive": 14,
+                      "tot_sReboundsDefensive": 20, "tot_sReboundsTotal": 34,
+                      "tot_sAssists": 14, "tot_sTurnovers": 11, "tot_sSteals": 11,
+                      "tot_sBlocks": 1, "tot_sFoulsPersonal": 20},
+            },
+        }
+        bundle["tbf_boxes"] = {"235591": box}
+        bundle["schedule"].append(row)
+        out = parse_bsl_bundle(bundle)
+        game = next(g for g in out["games"]
+                    if g["game_date"].startswith("2024-11-10"))
+        assert game["away_team_id"] == "BSL-246962"   # joined to 2025-26 Bursaspor
+        assert out["_meta"]["n_box_tbf_native"] == 1

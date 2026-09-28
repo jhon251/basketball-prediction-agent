@@ -148,6 +148,7 @@ class FeaturePipeline:
             away=away_features,
             league=league,
             game_league=game.league.value,
+            game_season=game.season,
             home_pace=home_features.pace,
             away_pace=away_features.pace,
             expected_pace=expected_pace,

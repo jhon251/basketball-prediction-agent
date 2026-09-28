@@ -56,11 +56,26 @@ LEAGUE_REGULATION_SECONDS: dict[str, float] = {
     "EUROLEAGUE": 2400.0, # 4 x 10 min (FIBA)
     "ACB": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-B6
     "NBL": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-D
-    "CBA": 2400.0,        # 4 x 10 min — FIBA rules since 2025-26 (Phase 8-E);
-                          # earlier CBA seasons (<= 2024-25) were 4 x 12: a
-                          # per-season table will be needed for multi-season CBA
+    "CBA": 2400.0,        # 4 x 10 min — FIBA rules since 2025-26 (Phase 8-E)
     "BSL": 2400.0,        # 4 x 10 min (FIBA) — Phase 8-F
 }
+
+# Per-season overrides for leagues whose regulation length changed
+# (Phase 8-H): the CBA played 4 x 12 (2880 s) through 2024-25 and moved to
+# FIBA 4 x 10 (2400 s) in 2025-26 — verified against the official
+# per-game ``minutes`` field (48 vs 40).
+LEAGUE_REGULATION_SECONDS_BY_SEASON: dict[str, dict[str, float]] = {
+    "CBA": {"2024-25": 2880.0},
+}
+
+
+def regulation_seconds_for(league: str | None, season: str | None) -> float:
+    """Regulation seconds for one game's league AND season (Phase 8-H)."""
+    base = LEAGUE_REGULATION_SECONDS.get(league or "NBA", 2880.0)
+    override = LEAGUE_REGULATION_SECONDS_BY_SEASON.get(league or "", {})
+    if season is not None and season in override:
+        return override[season]
+    return base
 
 
 def build_game_params(
@@ -123,7 +138,7 @@ def build_game_params(
         elo_win_prob_home=features.elo_win_prob_home,
         strength_win_prob_home=win_prob,
         provenance=features.provenance,
-        regulation_seconds=LEAGUE_REGULATION_SECONDS.get(
-            features.game_league or "NBA", 2880.0
+        regulation_seconds=regulation_seconds_for(
+            features.game_league, features.game_season
         ),
     )

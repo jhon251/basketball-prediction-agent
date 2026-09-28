@@ -65,6 +65,9 @@ _PLAYOFF_WEEKS = {
     "Playoff Yarı Final",
     "Playoff Final",
 }
+_PLAY_IN_WEEKS = {
+    "Play-in",  # the 2024-25 season introduced a play-in round
+}
 
 #: Verified LiveStats source defects (ACB precedent: explicit exclusion,
 #: never silent repair).  A listed match is EXCLUDED only when its LiveStats
@@ -85,12 +88,50 @@ class BSLDataError(RuntimeError):
     """Raised when the bundle cannot be mapped into validated records."""
 
 
-def resolve_team(team_id: Any) -> str:
-    """TBF numeric team id -> stored id (``BSL-`` prefixed)."""
+#: TBF assigns team ids per league-activity (per season) — the same club
+#: carries a different id in 2024-25 vs 2025-26 (verified: zero id overlap
+#: across the two ingested seasons; TBF's own model is a per-season
+#: "team process", see getTeamProcessIdForSeason in their front-end).
+#: Cross-season Elo/strength history therefore requires joining clubs
+#: explicitly.  This map redirects each 2024-25 club id to the canonical
+#: (2025-26) id of the SAME club; pairs were verified against the TBF team
+#: names of both seasons (sponsor prefixes change, base clubs match).
+#: Clubs present in only one season (Darüşşafaka LASSA and SEMT77
+#: Yalovaspor relegated after 2024-25; Safiport Erokspor and Trabzonspor
+#: promoted for 2025-26) are intentionally absent — no cross-season link
+#: is possible for them.
+CLUB_ID_CONTINUITY_2024_25: dict[int, int] = {
+    164374: 246936,  # Anadolu Efes
+    164375: 246960,  # Bahçeşehir Koleji
+    164376: 246961,  # Beşiktaş (Fibabanka -> Gain)
+    164377: 246962,  # Bursaspor (Yörsan -> Basketbol)
+    164378: 246963,  # Onvo Büyükçekmece Basketbol
+    164380: 246965,  # Fenerbahçe Beko
+    164381: 246966,  # Galatasaray (-> MCT Technic)
+    164382: 246967,  # Karşıyaka
+    164383: 246968,  # Manisa Basket (Divissa -> Glint)
+    164384: 246969,  # Yukatel Merkezefendi Belediyesi Basket
+    164389: 246970,  # Mersin Spor
+    164390: 246971,  # Aliağa Petkimspor (-> Petkim Spor)
+    164391: 246972,  # Tofaş
+    164392: 246974,  # Türk Telekom
+}
+
+
+def resolve_team(team_id: Any, season: str | None = None) -> str:
+    """TBF numeric team id -> stored id (``BSL-`` prefixed).
+
+    With a ``season`` given, per-season club ids are mapped to the
+    canonical (2025-26) id of the same club (Phase 8-H) so that
+    cross-season history links; without a season the raw id is used.
+    """
     text = str(team_id or "").strip()
     if not text.isdigit() or not 4 <= len(text) <= 9:
         raise BSLDataError(f"implausible BSL team id: {team_id!r}")
-    return f"BSL-{text}"
+    numeric = int(text)
+    if season == "2024-25":
+        numeric = CLUB_ID_CONTINUITY_2024_25.get(numeric, numeric)
+    return f"BSL-{numeric}"
 
 
 def _season_label(season: str) -> str:
@@ -109,6 +150,8 @@ def _competition_for(week: Any) -> Competition:
         return Competition.REGULAR_SEASON
     if text in _PLAYOFF_WEEKS:
         return Competition.PLAYOFF
+    if text in _PLAY_IN_WEEKS:
+        return Competition.PLAY_IN
     raise BSLDataError(
         f"unknown BSL week label {week!r} (extend "
         "bsl_livestats._PLAYOFF_WEEKS from a real payload; never guess)"
@@ -222,8 +265,9 @@ def parse_bsl_bundle(bundle: dict) -> dict:
     season = _season_label(bundle.get("season", ""))
     year = int(season.split("-")[0])
     livestats: dict = bundle.get("livestats") or {}
-    if not livestats:
-        raise BSLDataError("bundle contains no LiveStats payloads")
+    tbf_boxes: dict = bundle.get("tbf_boxes") or {}
+    if not livestats and not tbf_boxes:
+        raise BSLDataError("bundle contains no box-score payloads")
     schedule: list[dict] = bundle.get("schedule") or []
     if not schedule:
         raise BSLDataError("bundle contains no schedule rows")
@@ -236,6 +280,7 @@ def parse_bsl_bundle(bundle: dict) -> dict:
     team_ls_codes: dict[str, set[str]] = {}
     skipped_no_score = 0
     excluded_defects: list[int] = []
+    box_counts = {"livestats": 0, "tbf-native": 0}
     minutes_drifted = 0
     estimated = 0
     ot_games = 0
@@ -250,18 +295,22 @@ def parse_bsl_bundle(bundle: dict) -> dict:
             continue
 
         genius_id = row.get("genuisId")
-        if genius_id in (None, ""):
-            raise BSLDataError(
-                f"match {row.get('matchId')}: FINAL schedule row has no genuisId"
-            )
-        ls = livestats.get(str(genius_id))
+        match_id = int(row.get("matchId"))
+        ls = livestats.get(str(genius_id)) if genius_id not in (None, "") else None
+        box_source = "livestats"
+        if ls is None:
+            # seasons without LiveStats ids (e.g. 2024-25): TBF-native boxes
+            tbf_box = tbf_boxes.get(str(match_id))
+            if tbf_box is not None:
+                ls = tbf_box
+                box_source = "tbf-native"
         if ls is None:
             raise BSLDataError(
-                f"game {game_id}: FINAL match {row.get('matchId')} has no fetched "
-                "LiveStats payload (refetch with --resume)"
+                f"game {game_id}: FINAL match {match_id} has no fetched box "
+                "payload (refetch with --resume)"
             )
+        box_counts[box_source] += 1
 
-        match_id = int(row.get("matchId"))
         try:
             ls_home, ls_away = _ls_team_by_score(ls, home_score, away_score,
                                                  game_id)
@@ -279,7 +328,10 @@ def parse_bsl_bundle(bundle: dict) -> dict:
 
         home_t = (row.get("homeTeam") or {}).get("id")
         away_t = (row.get("awayTeam") or {}).get("id")
-        home_id, away_id = resolve_team(home_t), resolve_team(away_t)
+        # continuity map is keyed by the ROW's own season (a bundle is
+        # normally single-season; the row season is authoritative)
+        row_season = _season_label(row["season"]) if row.get("season") else season
+        home_id, away_id = resolve_team(home_t, row_season), resolve_team(away_t, row_season)
 
         # two-source rule: TBF schedule vs LiveStats box (independent feeds)
         if int(ls_home.get("score")) != home_score or int(ls_away.get("score")) != away_score:
@@ -339,7 +391,8 @@ def parse_bsl_bundle(bundle: dict) -> dict:
             t = row.get(side) or {}
             if t.get("id") in (None, ""):
                 continue
-            stored = resolve_team(t["id"])
+            row_season = _season_label(row["season"]) if row.get("season") else season
+            stored = resolve_team(t["id"], row_season)
             if stored not in teams:
                 teams[stored] = Team(
                     team_id=stored, league=League.BSL,
@@ -366,6 +419,8 @@ def parse_bsl_bundle(bundle: dict) -> dict:
                 {"matchId": mid, "reason": KNOWN_SOURCE_DEFECTS[mid]}
                 for mid in excluded_defects
             ],
+            "n_box_livestats": box_counts["livestats"],
+            "n_box_tbf_native": box_counts["tbf-native"],
             "n_overtime_games": ot_games,
             "team_minutes_drifted": minutes_drifted,
             "possessions_estimated_for": estimated,

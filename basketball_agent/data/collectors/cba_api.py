@@ -116,7 +116,7 @@ def _regulation_minutes(rows: list[dict]) -> int:
     if not base:
         raise CBADataError("no finished quarter==4 games to infer regulation length")
     top, count = base.most_common(1)[0]
-    if top <= 0 or top % 5 != 0:
+    if not 36 <= top <= 60:  # plausible regulation game lengths (FIBA 40 / NBA-style 48)
         raise CBADataError(f"implausible regulation minutes {top!r}")
     if len(base) > 1:
         others = {k: v for k, v in base.items() if k != top}
@@ -195,7 +195,13 @@ def parse_cba_bundle(bundle: dict) -> dict:
             day_rows.append((day, row))
     day_rows.sort(key=lambda dr: (str(dr[1].get("scheduleTime")), int(dr[1]["scheduleId"])))
 
-    regulation = _regulation_minutes([r for _, r in day_rows])
+    # regulation is inferred from games the adapter actually ingests:
+    # preseason (typeId 3) is played under FIBA rules even in 48-minute
+    # seasons and is dropped anyway (observed in the real 2024-25 bundle)
+    _INGESTED_TYPE_IDS = tuple(_MATCH_TYPE_TO_COMPETITION)
+    regulation = _regulation_minutes(
+        [r for _, r in day_rows
+         if r.get("matchTypeId") in _INGESTED_TYPE_IDS])
 
     games: list[Game] = []
     team_stats: list[TeamGameStats] = []

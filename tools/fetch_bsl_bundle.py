@@ -146,6 +146,61 @@ def slim_match(m: dict) -> dict:
     return slim
 
 
+# --- TBF-native box scores (seasons where the schedule carries no
+# genuisId — e.g. BSL 2024-25).  ``api/Match/mac-istatistik`` publishes the
+# official team totals; normalised here to the same field names the
+# LiveStats rows use so one adapter path validates both.
+
+_TBF_BOX_MAP = {
+    "points": "score",
+    "minutesPlayed": "tot_sMinutes",
+    "successfulShots": "tot_sFieldGoalsMade",
+    "shotAttempts": "tot_sFieldGoalsAttempted",
+    "twoPointShots": "tot_sTwoPointersMade",
+    "twoPointShotAttempts": "tot_sTwoPointersAttempted",
+    "threePointShots": "tot_sThreePointersMade",
+    "threePointShotAttempts": "tot_sThreePointersAttempted",
+    "freeThrows": "tot_sFreeThrowsMade",
+    "freeThrowAttempts": "tot_sFreeThrowsAttempted",
+    "offensiveRebounds": "tot_sReboundsOffensive",
+    "defensiveRebounds": "tot_sReboundsDefensive",
+    "totalRebounds": "tot_sReboundsTotal",
+    "assists": "tot_sAssists",
+    "turnovers": "tot_sTurnovers",
+    "steals": "tot_sSteals",
+    "blocks": "tot_sBlocks",
+    "fouls": "tot_sFoulsPersonal",
+}
+
+
+def fetch_tbf_box(match_id: int, pause: float) -> dict | None:
+    raw = _curl(f"{TBF}/api/Match/mac-istatistik?matchId={match_id}",
+                pause=pause)
+    if raw is None:
+        return None
+    d = json.loads(raw.decode("utf-8")).get("data") or {}
+    home = d.get("homeTeamTotal") or {}
+    away = d.get("awayTeamTotal") or {}
+    if not home or not away:
+        return None
+
+    def norm(t: dict) -> dict:
+        row = {ls_key: t.get(tbf_key) for tbf_key, ls_key in _TBF_BOX_MAP.items()}
+        row["code"] = ""
+        row["name"] = t.get("teamName") or ""
+        row["full_score"] = t.get("points")
+        return row
+
+    return {
+        "box_source": "tbf-native",
+        "periodLength": 10,
+        "periodLengthOVERTIME": 5,
+        "boxscore_source": ("TBF native match statistics (mac-istatistik "
+                            "team totals; no LiveStats feed for this season)"),
+        "teams": {"1": norm(home), "2": norm(away)},
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", default="2025-2026",
@@ -198,13 +253,19 @@ def main() -> int:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "schedule": [slim_match(m) for m in rows],
         "livestats": {},
+        "tbf_boxes": {},
     }
     if args.resume and bundle_path.exists():
         old = json.loads(bundle_path.read_text(encoding="utf-8"))
         bundle["livestats"] = old.get("livestats", {})
-        print(f"resume: {len(bundle['livestats'])} games already present")
+        bundle["tbf_boxes"] = old.get("tbf_boxes", {})
+        print(f"resume: {len(bundle['livestats'])} livestats, "
+              f"{len(bundle['tbf_boxes'])} tbf boxes already present")
 
     misses = []
+    no_feed = [m for m in rows if not m.get("genuisId")]
+    if no_feed:
+        print(f"{len(no_feed)} matches without genuisId -> TBF-native boxes")
     todo = [m for m in rows if m.get("genuisId")]
     for i, m in enumerate(todo, 1):
         gid = int(m["genuisId"])
@@ -222,14 +283,35 @@ def main() -> int:
             print(f"  progress: {len(bundle['livestats'])}/{len(todo)}")
         time.sleep(args.pause)
 
+    box_misses = []
+    for i, m in enumerate(no_feed, 1):
+        mid = int(m["matchId"])
+        if str(mid) in bundle["tbf_boxes"]:
+            continue
+        box = fetch_tbf_box(mid, pause=args.pause)
+        if box is None:
+            box_misses.append(mid)
+            continue
+        bundle["tbf_boxes"][str(mid)] = box
+        if i % 25 == 0:
+            bundle["fetched_at"] = datetime.now(timezone.utc).isoformat()
+            bundle_path.write_text(json.dumps(bundle, ensure_ascii=False),
+                                   encoding="utf-8")
+            print(f"  progress: {len(bundle['tbf_boxes'])}/{len(no_feed)}")
+        time.sleep(args.pause)
+
     bundle["fetched_at"] = datetime.now(timezone.utc).isoformat()
     bundle["n_matches"] = len(rows)
     bundle["n_livestats"] = len(bundle["livestats"])
+    bundle["n_tbf_boxes"] = len(bundle["tbf_boxes"])
     bundle["livestats_misses"] = misses
+    bundle["tbf_box_misses"] = box_misses
     bundle_path.write_text(json.dumps(bundle, ensure_ascii=False),
                            encoding="utf-8")
     print(f"bundle: {bundle_path} matches={len(rows)} "
-          f"livestats={len(bundle['livestats'])} misses={len(misses)}")
+          f"livestats={len(bundle['livestats'])} "
+          f"tbf_boxes={len(bundle['tbf_boxes'])} "
+          f"misses={len(misses)}/{len(box_misses)}")
     return 0
 
 

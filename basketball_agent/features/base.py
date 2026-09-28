@@ -132,3 +132,6 @@ class GameFeatures:
     # League identity of the target game (Phase 8-B3): drives per-league
     # parameters (e.g. 40-minute regulation) — history is already league-scoped
     game_league: str | None = None
+    # Season of the target game (Phase 8-H): drives per-season regulation
+    # overrides (CBA 2024-25 was 4 x 12; 2025-26+ is FIBA 4 x 10)
+    game_season: str | None = None
