@@ -252,3 +252,40 @@ def _repo_root() -> str:
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def cba_schedule_rows(season_value: str, months: list[tuple[int, int]]) -> list[dict]:
+    """Per-game schedule rows for one CBA season (via the encrypted
+    schedules/day endpoint).  Returns light rows compatible with the
+    BSL/NBL upsert pipeline."""
+    rows = []
+    seen_ids: set[str] = set()
+    for year, month in months:
+        raw = _cba_curl(f"/api/schedules/month?year={year}&month={month:02d}")
+        data = json.loads(decrypt_cba(raw))
+        for day_entry in data:
+            day = (day_entry.get("scheduleTime") or "")[:10]
+            if not day:
+                continue
+            day_raw = _cba_curl(
+                f"/api/schedules/day?day={day}&auto=0")
+            day_data = json.loads(decrypt_cba(day_raw))
+            for g in day_data:
+                sid = str(g.get("scheduleId") or "")
+                if not sid or sid in seen_ids:
+                    continue
+                seen_ids.add(sid)
+                home = g.get("homeTeamId") or g.get("homeTeamName")
+                away = g.get("visitingTeamId") or g.get("visitingTeamName")
+                rows.append({
+                    "source_id": sid,
+                    "date": day,
+                    "match_time": (g.get("matchTime") or "00:00"),
+                    "status_raw": str(g.get("status", "")),
+                    "home": g.get("homeTeamName") or str(home),
+                    "away": g.get("visitingTeamName") or str(away),
+                    "home_id": str(home), "away_id": str(away),
+                    "home_score": g.get("homeTeamScore"),
+                    "away_score": g.get("visitingTeamScore"),
+                })
+    return rows

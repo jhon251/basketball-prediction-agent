@@ -70,6 +70,8 @@ TEAM_TIMEZONES: dict[str, str] = {
     "VIR": "Europe/Rome",       # Virtus Segafredo Bologna
     "VAL": "Europe/Madrid",     # Valencia Basket (official CodeTeam value is PAM)
     "ZAL": "Europe/Vilnius",    # Zalgiris Kaunas
+    "DUB": "Asia/Dubai",        # Dubai Basketball (joined 2025-26)
+    "HTA": "Asia/Jerusalem",    # Hapoel IBI Tel Aviv (joined 2025-26)
     # seasons E2019-E2021 only (Russian clubs were excluded from 2022-23 on);
     # canonical ids are the official CodeTeam values observed in those bundles
     "CSK": "Europe/Moscow",     # CSKA Moscow
@@ -113,6 +115,9 @@ for _canon, _aliases in {
     "DYR": ("zen", "zenit", "zenit st petersburg", "zenit saint petersburg"),
     "UNK": ("uni", "unics", "unics kazan"),
     "KHI": ("khimki", "khimki moscow region", "khimki moskva", "bck himki"),
+    "DUB": ("dubai", "dubai basketball"),
+    "HTA": ("hta", "hapoel tel aviv", "hapoel ibi tel aviv",
+            "hapoel hapoel tel aviv"),
 }.items():
     for _alias in _aliases:
         ALIAS_TO_TEAM.setdefault(_alias, _canon)

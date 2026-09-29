@@ -132,8 +132,8 @@ class ProductionLoop:
         )
 
         repo = Repository(self._db)
-        row_sources = {"BSL", "NBL"}
-        for league in (leagues or ["BSL", "NBL"]):
+        row_sources = {"BSL", "NBL", "CBA"}
+        for league in (leagues or sorted(row_sources)):
             if league not in row_sources:
                 continue
             try:
@@ -163,6 +163,9 @@ class ProductionLoop:
                     if league == "BSL":
                         home = bsl_resolve(r["home_id"], season=season_norm)
                         away = bsl_resolve(r["away_id"], season=season_norm)
+                    elif league == "CBA":
+                        home = f"CBA-{r['home_id']}"
+                        away = f"CBA-{r['away_id']}"
                     else:
                         home, away = r["home_id"], r["away_id"]
                     Repository(self._db).insert_game(type("G", (), {
