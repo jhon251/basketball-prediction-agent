@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS game_odds (
     market          TEXT NOT NULL CHECK (market IN ('MONEYLINE', 'SPREAD', 'TOTAL')),
     kind            TEXT NOT NULL CHECK (kind IN ('OPEN', 'CLOSE')),
     line            REAL,
-    price_decimal   REAL NOT NULL CHECK (price_decimal > 1.0 AND price_decimal <= 100.0),
+    price_decimal   REAL NOT NULL CHECK (price_decimal >= 1.01 AND price_decimal <= 100.0),
     price_home      REAL,
     price_away      REAL,
     captured_at     TEXT NOT NULL,

@@ -74,19 +74,21 @@ SOURCE_STATUS: UNAVAILABLE
 在既有 walk-forward 窗口上，market closing probability 作为第四列与
 frozen elo/strength/simulation 同框报告 log loss / Brier / accuracy。
 
-### Flat-stake ROI 回测
+### Flat-stake ROI 回测（Phase 11-A.2 已接线去水）
 ```python
 flat_stake_roi(predictions, odds_rows, edge_thresholds=(0.0, 0.02, 0.05, 0.10))
 ```
-- edge = model_p − market_p (de-vigged)
+- edge = model_p − fair_home（去水后市场概率，via moneyline_pair_to_fair）
 - 每个阈值报告 n_bets / n_wins / total_staked / total_return / ROI / profit
 - 资金曲线按赛季窗口分段防单季运气
+- 无双边价的行 → skipped_no_pair 计数（不猜单边）
 
 ### 防泄漏硬规则
 - 赔率表 `game_odds` 仅存在于 evaluation 层，**features/models 模块源码级
   不引用**（测试钉住）
 - ROI 回测只读已 settled 的预测 + 已存 odds，永不重跑预测核心
 - 收盘价仅用于事后比较，永不进入 feature
+- 价格下限统一为 1.01（DDL CHECK + Repository 守卫一致）
 
 ## 5. CLI
 

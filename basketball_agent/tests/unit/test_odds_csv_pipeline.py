@@ -163,16 +163,20 @@ class TestROIEndToEnd:
         }])
         all_odds = repo.get_odds_for_game("20241121_GSW_DEN",
                                           market="MONEYLINE", kind="CLOSE")
-        # combine odds for both games
+        # combine odds for both games (with American prices for de-vig)
         odds_data = []
         for o in repo.get_odds_for_game("20241120_LAL_BOS",
                                         market="MONEYLINE", kind="CLOSE"):
             odds_data.append({"game_id": o["game_id"],
                               "price_decimal": o["price_decimal"],
+                              "price_home": o.get("price_home") or -110,
+                              "price_away": o.get("price_away") or 110,
                               "market": o["market"], "kind": o["kind"]})
         for o in all_odds:
             odds_data.append({"game_id": o["game_id"],
                               "price_decimal": o["price_decimal"],
+                              "price_home": o.get("price_home") or -110,
+                              "price_away": o.get("price_away") or 110,
                               "market": o["market"], "kind": o["kind"]})
 
         results = flat_stake_roi(predictions, odds_data,

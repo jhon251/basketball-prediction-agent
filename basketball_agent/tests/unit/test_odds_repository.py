@@ -110,3 +110,16 @@ class TestQueryOdds:
         assert cov["total_odds_rows"] == 1
         assert cov["games_with_close"] == 1
         assert "NBA" in cov["by_league"]
+
+
+class TestPriceLowerBound:
+    def test_price_1_005_rejected(self, odds_repo):
+        """DDL CHECK and repository guard both enforce >= 1.01."""
+        bad = dict(_VALID, price_decimal=1.005)
+        with pytest.raises(OddsDataError, match="out of range"):
+            odds_repo.insert_odds([bad])
+
+    def test_price_1_01_accepted(self, odds_repo):
+        ok = dict(_VALID, price_decimal=1.01)
+        inserted, _ = odds_repo.insert_odds([ok])
+        assert inserted == 1

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -242,6 +243,21 @@ def _build_parser() -> argparse.ArgumentParser:
     st_sub = st.add_subparsers(dest="st_command")
     st_sub.add_parser("status", help="full production status report")
 
+    odds = sub.add_parser("odds",
+                          help="odds data operations (Phase 11-A)")
+    odds_sub = odds.add_subparsers(dest="odds_command", required=True)
+    odds_ingest = odds_sub.add_parser("ingest", help="ingest odds from CSV")
+    odds_ingest.add_argument("--file", required=True)
+    odds_ingest.add_argument("--column-map", default=None,
+                             help="JSON object mapping CSV columns to canonical")
+    odds_ingest.add_argument("--source", default="csv_import")
+    odds_cov = odds_sub.add_parser("coverage",
+                                   help="odds table coverage (read-only)")
+    odds_roi = odds_sub.add_parser("roi",
+                                   help="ROI backtest (requires odds + predictions)")
+    odds_roi.add_argument("--leagues", default=None)
+    odds_roi.add_argument("--thresholds", default="0.0,0.02,0.05,0.10")
+
     prod = sub.add_parser("production",
                           help="production auto-prediction loop (Phase 10-E.2: "
                                "collect -> predict -> log -> settle)")
@@ -449,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_collector(args)
     if args.command == "production":
         return _cmd_production(args)
+    if args.command == "odds":
+        return _cmd_odds(args)
     if args.command == "agent":
         return _cmd_agent_status(args)
     if args.command == "evaluate":
@@ -822,6 +840,97 @@ def _cmd_production(args) -> int:
             print(f"  {k}: {state.get(k)}")
         print(f"  last_errors: {state.get('last_errors') or []}")
         return 0
+    return 2
+
+
+def _cmd_odds(args) -> int:
+    from basketball_agent.data.db.odds_repository import OddsRepository
+
+    db, _ = _open_db()
+    repo = OddsRepository(db)
+
+    if args.odds_command == "ingest":
+        from basketball_agent.data.collectors.nba_odds_csv import (
+            load_nba_odds_csv,
+        )
+        column_map = None
+        if args.column_map:
+            column_map = json.loads(args.column_map)
+        odds_rows, skipped = load_nba_odds_csv(
+            args.file, db, column_map=column_map, source=args.source)
+        inserted, dup = repo.insert_odds(odds_rows)
+        print(f"odds ingest: {inserted} inserted, {dup} duplicate, "
+              f"{len(skipped)} skipped")
+        for s in skipped[:5]:
+            print(f"  skip: {s}")
+        return 0
+
+    if args.odds_command == "coverage":
+        cov = repo.coverage()
+        print("ODDS COVERAGE")
+        print(f"  total odds rows: {cov['total_odds_rows']}")
+        print(f"  games with CLOSE: {cov['games_with_close']}")
+        for league, d in sorted(cov["by_league"].items()):
+            print(f"  {league:12s} rows={d['rows']:5d} games={d['games']:5d}")
+        for market, n in sorted(cov["by_market"].items()):
+            print(f"  market={market:12s} rows={n}")
+        return 0
+
+    if args.odds_command == "roi":
+        from datetime import datetime as _dt
+
+        from basketball_agent.collection.production_loop import (
+            ProductionLoop as _PL,
+        )
+        from basketball_agent.collection.scheduler import (
+            CollectionScheduler as _CS,
+        )
+        from basketball_agent.collection.state import CollectorState as _CS2
+        from basketball_agent.agents.prediction_agent import (
+            PredictionAgent as _PA,
+        )
+        from basketball_agent.agents.decision_log import DecisionLog as _DL
+        from basketball_agent.agents.risk_analysis import (
+            RiskAnalysisAgent as _RA,
+        )
+        from basketball_agent.agents.decision_record import (
+            DecisionRecordAgent as _DRA,
+        )
+        from basketball_agent.agents.persistence import persist as _persist
+
+        settings = get_settings()
+        state_dir = _Path(settings.db_path).parent / "collector"
+        sched = _CS(Repository(db), state_dir)
+        core = _PA(Repository(db), n_simulations=100, seed=7)
+        log = _DL(_Path(settings.db_path).parent / "agent_log")
+        loop = _PL(db, sched, core, log, CollectorState(state_dir),
+                   state_dir=state_dir)
+        now = datetime.now(timezone.utc)
+        leagues = ([x.strip().upper() for x in args.leagues.split(",")]
+                   if args.leagues else None)
+        report = loop.run(leagues, now=now, skip_collection=True)
+        predictions = []
+        for p in report.predicted:
+            predictions.append({
+                "game_id": p["game_id"], "prob_home": p["prob_home"],
+                "actual_home_win": None})
+        odds_rows = repo.get_odds_for_game.__func__(repo) if False else []
+        # load all odds
+        from basketball_agent.data.db.odds_repository import OddsRepository as _OR
+        all_odds = []
+        with db.connect() as conn:
+            for row in conn.execute("SELECT * FROM game_odds").fetchall():
+                all_odds.append(dict(row))
+        thresholds = tuple(float(x) for x in args.thresholds.split(","))
+        results = flat_stake_roi(predictions, all_odds, thresholds)
+        print("ROI BACKTEST (flat-stake, edge threshold sweep)")
+        for r in results:
+            print(f"  threshold>={r.threshold:.2f}: n={r.n_bets} "
+                  f"wins={r.n_wins} staked={r.total_staked:.1f} "
+                  f"return={r.total_return:.1f} ROI={r.roi:+.4f} "
+                  f"profit={r.profit:+.2f}")
+        return 0
+
     return 2
 
 

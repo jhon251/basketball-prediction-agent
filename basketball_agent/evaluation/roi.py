@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from basketball_agent.evaluation.devig import american_to_decimal
+from basketball_agent.evaluation.devig import (american_to_decimal, moneyline_pair_to_fair)
 from basketball_agent.evaluation.settlement import SettlementStore
 
 
@@ -31,6 +31,7 @@ class RoiResult:
     total_return: float
     roi: float                       # total_return / total_staked (can be negative)
     profit: float                    # total_return − total_staked
+    skipped_no_pair: int = 0
 
 
 def flat_stake_roi(
@@ -42,34 +43,44 @@ def flat_stake_roi(
 
     ``predictions``: settled predictions with ``game_id``, ``prob_home``,
     ``actual_home_win`` (bool).
-    ``odds_rows``: market rows with ``game_id``, ``price_decimal``
-    (decimal odds for the bet side), ``market`` == "MONEYLINE".
+    ``odds_rows``: market rows with ``game_id``, ``price_home``,
+    ``price_away`` (both required for de-vig), ``market`` == "MONEYLINE",
+    ``kind`` == "CLOSE".
 
-    Only MONEYLINE is evaluated (SPREAD/TOTAL are unavailable if the data
-    source doesn't provide spread/total odds).
+    Edge = model_p − fair_home (de-vigged market probability).
+    Rows without both prices are counted in ``skipped_no_pair``.
     """
-    # index odds by game_id (CLOSE MONEYLINE only)
-    odds_map: dict[str, float] = {}
+    odds_map: dict[str, tuple[float, float]] = {}
+    skipped_no_pair = 0
     for o in odds_rows:
-        if o.get("market") == "MONEYLINE" and o.get("kind") == "CLOSE":
-            odds_map[o["game_id"]] = float(o["price_decimal"])
+        if o.get("market") != "MONEYLINE" or o.get("kind") != "CLOSE":
+            continue
+        ph, pa = o.get("price_home"), o.get("price_away")
+        if ph is None or pa is None:
+            skipped_no_pair += 1
+            continue
+        odds_map[o["game_id"]] = (float(ph), float(pa))
 
     results = []
     for threshold in edge_thresholds:
         bets = []
         for p in predictions:
             gid = p["game_id"]
-            if gid not in odds_map:
+            pair = odds_map.get(gid)
+            if pair is None:
                 continue
+            am_h, am_a = pair
+            fair_h, _, _ = moneyline_pair_to_fair(int(am_h), int(am_a))
             model_p = p["prob_home"]
-            dec_odds = odds_map[gid]
-            market_p = 1.0 / dec_odds
-            if model_p - market_p >= threshold:
-                won = p.get("actual_home_win")
-                if won is None:
-                    continue
-                profit = (dec_odds - 1.0) if won else -1.0
-                bets.append(profit)
+            edge = model_p - fair_h
+            if edge < threshold:
+                continue
+            dec = american_to_decimal(int(am_h))
+            won = p.get("actual_home_win")
+            if won is None:
+                continue
+            profit = (dec - 1.0) if won else -1.0
+            bets.append(profit)
         n = len(bets)
         total_profit = sum(bets)
         total_staked = float(n)
@@ -82,5 +93,6 @@ def flat_stake_roi(
             total_return=total_return,
             roi=round(roi, 6),
             profit=round(total_profit, 4),
+            skipped_no_pair=skipped_no_pair,
         ))
     return results
