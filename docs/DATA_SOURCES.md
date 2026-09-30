@@ -237,3 +237,16 @@ LiveStats 端点收紧 → nbl.com.au 官方 gamecenter（JS 渲染，抓取成�
 - CBA 官方: https://www.cbaleague.com
 - Sportradar 篮球: https://marketplace.sportradar.com/
 - SkillCorner 开放 tracking: https://github.com/SkillCorner/opendata-basketball
+
+## 7. 赔率数据域（Phase 11-A）
+
+| 联赛 | 源 | 状态 |
+|---|---|---|
+| NBA | covers.com / SBR / Kaggle | ⛔ 全部需认证或反爬——管线已建（`nba_odds_csv.py`），等用户投喂 CSV |
+| CBA | 竞彩官方 | 后续阶段 |
+| 其他 | 未探 | 后续阶段 |
+
+适配器：`data/collectors/nba_odds_csv.py`（canonical 列名映射 + UnknownTeamError）
+存储：`game_odds` 表（append-only, UNIQUE 约束, FK→games）
+去水：`evaluation/devig.py`（multiplicative，保守近似）
+评估：`evaluation/roi.py`（flat-stake ROI, edge threshold sweep）

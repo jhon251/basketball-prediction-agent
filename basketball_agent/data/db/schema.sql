@@ -120,3 +120,19 @@ CREATE TABLE IF NOT EXISTS predictions (
     log_loss         REAL,
     correct          INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS game_odds (
+    odds_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL REFERENCES games (game_id),
+    league          TEXT NOT NULL,
+    bookmaker       TEXT NOT NULL,
+    market          TEXT NOT NULL CHECK (market IN ('MONEYLINE', 'SPREAD', 'TOTAL')),
+    kind            TEXT NOT NULL CHECK (kind IN ('OPEN', 'CLOSE')),
+    line            REAL,
+    price_decimal   REAL NOT NULL CHECK (price_decimal > 1.0 AND price_decimal <= 100.0),
+    price_home      REAL,
+    price_away      REAL,
+    captured_at     TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT '',
+    UNIQUE (game_id, bookmaker, market, kind, captured_at)
+);
