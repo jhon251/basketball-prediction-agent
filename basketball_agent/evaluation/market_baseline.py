@@ -1,4 +1,4 @@
-"""Market baseline backtest (Phase 11-A.2, hardened in 11-A.3).
+"""Market baseline backtest (Phase 11-A.2, hardened in 11-A.3; entries in 11-A.4).
 
 Runs the frozen walk-forward loop (identical to run_window_backtest) and
 joins the per-game model probabilities with stored closing odds to
@@ -16,6 +16,12 @@ Sample discipline (Phase 11-A.3):
   model's metrics.  ``subset=all`` rows are REFERENCE ONLY — they must
   not be compared against ``subset=with_odds`` rows.
 
+Per-game export (Phase 11-A.4): :func:`walk_forward_entries` exposes the
+per-game probabilities (game_id / season / outcome / p_random / p_elo /
+p_strength / p_simulation / p_market, with ``p_market=None`` when no
+stored CLOSE pair exists); :func:`market_baseline_backtest` consumes it
+and aggregates the ``BaselineRow`` metrics.
+
 Evidence kind: ``backtest_with_market_baseline``.  No model is re-run;
 no parameter is fitted; no odds value enters any feature.
 """
@@ -25,7 +31,6 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from basketball_agent.data.db.connection import Database
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import (
     NON_REGULAR_COMPETITIONS,
@@ -33,7 +38,6 @@ from basketball_agent.data.schemas.base import (
     League,
 )
 from basketball_agent.evaluation.backtest import (
-    BacktestConfig,
     EloPredictor,
     RandomPredictor,
     SimulationPredictor,
@@ -44,7 +48,6 @@ from basketball_agent.features.feature_pipeline import (
     FeatureComputationError,
     FeaturePipeline,
 )
-from basketball_agent.models.game_params import build_game_params
 
 
 def _ll(probs: list[float], outs: list[bool]) -> float | None:
@@ -117,6 +120,83 @@ class BaselineRow:
     accuracy: float | None
 
 
+ENTRY_KEYS = ("game_id", "season", "outcome", "p_random", "p_elo",
+              "p_strength", "p_simulation", "p_market")
+
+
+def walk_forward_entries(
+    db,
+    window_start: datetime,
+    window_end: datetime | None,
+    *,
+    league: League | None = None,
+    n_simulations: int = 100,
+    seed: int = 7,
+    warmup_games: int = 5,
+) -> list[dict]:
+    """Frozen walk-forward with per-game probability export (11-A.4).
+
+    Same chronological loop the aggregate baseline has always used
+    (FINAL REGULAR games in the window, features as-of each tip-off,
+    warmup filter) — the aggregates in :func:`market_baseline_backtest`
+    are computed from exactly these entries.  Each entry has the keys
+    :data:`ENTRY_KEYS`:
+
+      game_id, season, outcome (True = home win),
+      p_random, p_elo, p_strength, p_simulation,
+      p_market (de-vigged fair home probability from the stored CLOSE
+      MONEYLINE pair; ``None`` when the game has no odds row).
+
+    Raises ``OddsDataUnavailable`` when the odds table is missing.
+    """
+    from basketball_agent.evaluation.devig import moneyline_pair_to_fair
+
+    odds_map = load_odds_map(db)
+    repo = Repository(db)
+    pipeline = FeaturePipeline(repo)
+    predictors = {
+        "random": RandomPredictor(),
+        "elo": EloPredictor(),
+        "strength": StrengthPredictor(),
+        "simulation": SimulationPredictor(
+            n_simulations=n_simulations, seed=seed),
+    }
+
+    games = [
+        g for g in repo.list_games(
+            status=GameStatus.FINAL, league=league,
+            exclude_competitions=tuple(NON_REGULAR_COMPETITIONS))
+        if g.game_date >= window_start
+        and (window_end is None or g.game_date < window_end)
+    ]
+    games.sort(key=lambda g: (g.game_date, g.game_id))
+
+    entries: list[dict] = []
+    for g in games:
+        as_of = g.game_date
+        if warmup_not_met(repo, g, as_of, warmup_games):
+            continue
+        try:
+            features = pipeline.compute(g.game_id, as_of)
+        except FeatureComputationError:
+            continue
+        entry = {
+            "game_id": g.game_id, "season": g.season,
+            "outcome": g.home_score > g.away_score,
+            "p_random": 0.5,
+            "p_market": None,
+        }
+        for model in ("elo", "strength", "simulation"):
+            pred = predictors[model].predict(features)
+            entry[f"p_{model}"] = pred.prob_home
+        pair = odds_map.get(g.game_id)
+        if pair is not None:
+            fair_home, _, _ = moneyline_pair_to_fair(int(pair[0]), int(pair[1]))
+            entry["p_market"] = fair_home
+        entries.append(entry)
+    return entries
+
+
 def market_baseline_backtest(
     db,
     window_start: datetime,
@@ -129,65 +209,14 @@ def market_baseline_backtest(
 ) -> list[BaselineRow]:
     """Frozen walk-forward + closing-odds market baseline.
 
-    Returns ``BaselineRow`` objects on TWO subsets:
+    Aggregates :func:`walk_forward_entries` into ``BaselineRow`` objects
+    on TWO subsets:
       subset=with_odds  — the fair comparison set (games with odds)
       subset=all        — the full walk-forward window (reference only)
     """
-    from basketball_agent.evaluation.devig import moneyline_pair_to_fair
-    from basketball_agent.evaluation.settlement import SettlementStore
-
-    store = SettlementStore(db)
-    odds_map = load_odds_map(db)
-
-    config = BacktestConfig(
+    entries = walk_forward_entries(
+        db, window_start, window_end, league=league,
         n_simulations=n_simulations, seed=seed, warmup_games=warmup_games)
-    from basketball_agent.data.db.repository import Repository
-
-    repo = Repository(db)
-    pipeline = FeaturePipeline(repo)
-    predictors = {
-        "random": RandomPredictor(),
-        "elo": EloPredictor(),
-        "strength": StrengthPredictor(),
-        "simulation": SimulationPredictor(
-            n_simulations=n_simulations, seed=seed),
-    }
-
-    games = [
-        g for g in Repository(db).list_games(
-            status=GameStatus.FINAL, league=league,
-            exclude_competitions=tuple(NON_REGULAR_COMPETITIONS))
-        if g.game_date >= window_start
-        and (window_end is None or g.game_date < window_end)
-    ]
-    games.sort(key=lambda g: (g.game_date, g.game_id))
-
-    # collect per-game entries
-    entries: list[dict] = []
-    for g in games:
-        as_of = g.game_date
-        if warmup_not_met(repo, g, as_of, warmup_games):
-            continue
-        try:
-            features = pipeline.compute(g.game_id, as_of)
-        except FeatureComputationError:
-            continue
-        outcome = g.home_score > g.away_score
-        entry = {
-            "game_id": g.game_id, "season": g.season,
-            "outcome": outcome,
-            "p_random": 0.5,
-        }
-        for model in ("elo", "strength", "simulation"):
-            pred = predictors[model].predict(features)
-            entry[f"p_{model}"] = pred.prob_home
-        # market fair probability from stored odds
-        pair = odds_map.get(g.game_id)
-        if pair is not None:
-            fh, _, _ = moneyline_pair_to_fair(int(pair[0]), int(pair[1]))
-            entry["p_market"] = fh
-        entries.append(entry)
-
     if not entries:
         return []
 
@@ -195,7 +224,7 @@ def market_baseline_backtest(
     rows: list[BaselineRow] = []
 
     # subset=with_odds: only games that have a market probability
-    with_odds = [e for e in entries if "p_market" in e]
+    with_odds = [e for e in entries if e["p_market"] is not None]
     # subset=all: the full walk-forward window
     for subset_name, subset in (("with_odds", with_odds), ("all", entries)):
         for model in models:
@@ -206,7 +235,7 @@ def market_baseline_backtest(
                 if p is not None:
                     probs.append(p)
                     outs.append(e["outcome"])
-            n_odds = sum(1 for e in subset if "p_market" in e)
+            n_odds = sum(1 for e in subset if e["p_market"] is not None)
             rows.append(BaselineRow(
                 model=model, subset=subset_name, n_games=len(outs),
                 n_with_odds=n_odds,
@@ -214,10 +243,3 @@ def market_baseline_backtest(
                 accuracy=_acc(probs, outs)))
 
     return rows
-
-
-def db_games(db, league=None):
-    """Yield FINAL REGULAR_SEASON games (same filters as run_window_backtest)."""
-    return Repository(db).list_games(
-        status=GameStatus.FINAL, league=league,
-        exclude_competitions=tuple(NON_REGULAR_COMPETITIONS))

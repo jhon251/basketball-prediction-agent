@@ -253,10 +253,21 @@ def _build_parser() -> argparse.ArgumentParser:
     odds_ingest.add_argument("--source", default="csv_import")
     odds_cov = odds_sub.add_parser("coverage",
                                    help="odds table coverage (read-only)")
-    odds_roi = odds_sub.add_parser("roi",
-                                   help="ROI backtest (requires odds + predictions)")
-    odds_roi.add_argument("--leagues", default=None)
+    odds_roi = odds_sub.add_parser(
+        "roi",
+        help="symmetric flat-stake ROI backtest (frozen walk-forward × "
+             "closing odds; read-only, zero side effects)")
+    odds_roi.add_argument("--league", default=None)
+    odds_roi.add_argument("--window-start", required=True)
+    odds_roi.add_argument("--window-end", default=None)
     odds_roi.add_argument("--thresholds", default="0.0,0.02,0.05,0.10")
+    odds_roi.add_argument("--model", default="simulation",
+                          choices=["random", "elo", "strength", "simulation"],
+                          help="probability source for the edge (default: "
+                               "simulation, the frozen primary)")
+    odds_roi.add_argument("--n-simulations", type=int, default=100)
+    odds_roi.add_argument("--seed", type=int, default=7)
+    odds_roi.add_argument("--warmup", type=int, default=5)
     odds_base = odds_sub.add_parser(
         "baseline", help="market baseline backtest (frozen walk-forward × odds)")
     odds_base.add_argument("--league", default=None)
@@ -916,10 +927,12 @@ def _cmd_odds_baseline(args, db) -> int:
 
 
 def _cmd_odds_roi(args, db) -> int:
-    """Symmetric flat-stake ROI backtest (zero side effects)."""
+    """Symmetric flat-stake ROI backtest (read-only, zero side effects)."""
     from basketball_agent.data.schemas.base import League
-    from basketball_agent.evaluation.market_baseline import market_baseline_backtest
-    from basketball_agent.evaluation.devig import moneyline_pair_to_fair
+    from basketball_agent.evaluation.market_baseline import (
+        load_odds_map,
+        walk_forward_entries,
+    )
     from basketball_agent.evaluation.roi import flat_stake_roi
 
     league = League(args.league) if args.league else None
@@ -927,18 +940,34 @@ def _cmd_odds_roi(args, db) -> int:
     window_end = _parse_as_of(args.window_end) if args.window_end else None
     thresholds = tuple(float(x) for x in args.thresholds.split(","))
 
-    rows = market_baseline_backtest(
+    entries = walk_forward_entries(
         db, window_start, window_end, league=league,
-        n_simulations=100, seed=7)
-    print("ROI BACKTEST (frozen walk-forward × closing odds; zero side effects)")
-    print(f"{'model':14s} {'side':5s} {'n':>5s} {'ROI':>8s} {'profit':>8s}")
-    # the market_baseline_backtest returns aggregate metrics only;
-    # for per-bet ROI we need the per-game entries.  Report the aggregate
-    # logloss comparison and note that detailed ROI requires the full
-    # per-game walk-forward output (use tools/analyze_8i.py for now).
-    for r in rows:
-        print(f"  {r.model:14s} n={r.n_games:5d} ll={r.log_loss} "
-              f"brier={r.brier} acc={r.accuracy}")
+        n_simulations=args.n_simulations, seed=args.seed,
+        warmup_games=args.warmup)
+    odds_map = load_odds_map(db)   # fail-loud: no odds table -> error
+    odds_rows = [
+        {"game_id": gid, "price_home": pair[0], "price_away": pair[1],
+         "market": "MONEYLINE", "kind": "CLOSE"}
+        for gid, pair in sorted(odds_map.items())]
+    predictions = [
+        {"game_id": e["game_id"], "prob_home": e[f"p_{args.model}"],
+         "actual_home_win": e["outcome"]}
+        for e in entries]
+    results = flat_stake_roi(
+        predictions, odds_rows, edge_thresholds=thresholds,
+        sides=("home", "away"))
+
+    n_odds = sum(1 for e in entries if e["p_market"] is not None)
+    print(f"ROI BACKTEST (symmetric flat-stake; frozen walk-forward × "
+          f"closing odds; model={args.model}; zero side effects)")
+    print(f"  entries={len(entries)} with_close_odds={n_odds} "
+          f"thresholds={args.thresholds}")
+    print(f"{'threshold':>9s} {'side':>4s} {'n':>5s} {'wins':>6s} "
+          f"{'staked':>7s} {'ROI':>9s} {'profit':>9s}")
+    for r in results:
+        print(f"{r.threshold:9.2f} {r.side:>4s} {r.n_bets:5d} "
+              f"{r.n_wins:6d} {r.total_staked:7.1f} "
+              f"{r.roi:9.4f} {r.profit:9.4f}")
     return 0
 
 
