@@ -127,18 +127,59 @@ def bsl_matches(activity_id: int, season_id: int) -> list[dict]:
 
 
 # ----------------------------------------------------------------- NBL
+def _nbl_kickoff_utc(m: dict) -> tuple[str, str]:
+    """Kickoff ``(date, HH:MM)`` in UTC for one NBL calendar row.
+
+    The 2026-27 calendar dropped the legacy ``start_time_datetime`` text
+    field; the only kickoff fact left is the epoch-millis
+    ``starts_at_ms`` (present on every row).  The production loop stamps
+    NBL rows UTC (``_league_tz``), so UTC is the contract here.  Returns
+    ``("", "")`` when neither field yields a date — such rows are counted
+    by the upsert pass as ``skipped_no_date``, never guessed.
+    """
+    ms = m.get("starts_at_ms")
+    if ms:
+        ms = float(ms)
+        if ms < 1e11:  # seconds-shaped epoch -> normalise to millis
+            ms *= 1000.0
+        dt = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+    legacy = str(m.get("start_time_datetime") or "")
+    if legacy[:10]:
+        return legacy[:10], (legacy[11:16] or "00:00")
+    return "", ""
+
+
+def _nbl_team_ref(team: dict) -> str:
+    """Canonical team ref for an upsert row: ``NBL-{team_code}`` — the
+    same id shape the core's teams table and the season-refresh fetcher
+    use (via ``nbl_api.resolve_team``).  Falls back to the raw source id
+    when the code is implausible/missing; a row with an unresolvable ref
+    then fails its own FK check (per-row isolation) instead of poisoning
+    the whole discovery."""
+    team = team or {}
+    code = str(team.get("team_code") or "").strip()
+    try:
+        from basketball_agent.data.collectors.nbl_api import resolve_team
+        return resolve_team(code)
+    except Exception:  # noqa: BLE001 — row-level fallback, never discovery-wide
+        return str(team.get("id"))
+
+
 def nbl_matches(year: int) -> list[dict]:
     data = _get_json(f"{NBL_CAL}?league=nbl&year={year}")
     rows = []
     for m in data.get("matches") or []:
         home = m.get("home") or {}
         away = m.get("away") or {}
+        date, match_time = _nbl_kickoff_utc(m)
         rows.append({
             "source_id": str(m.get("id")),
-            "date": ((m.get("start_time_datetime") or "")[:10]),
+            "date": date,
+            "match_time": match_time,
             "status_raw": m.get("phase"),
             "home": home.get("name"), "away": away.get("name"),
-            "home_id": home.get("id"), "away_id": away.get("id"),
+            "home_id": _nbl_team_ref(home), "away_id": _nbl_team_ref(away),
             "home_score": m.get("home_score"), "away_score": m.get("away_score"),
         })
     return rows

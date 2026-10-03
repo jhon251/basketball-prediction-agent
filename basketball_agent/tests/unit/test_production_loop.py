@@ -223,3 +223,98 @@ class TestSixLeagueIsolation:
         s2.update("LOOP", status="failed", source="loop", errors=["x"])
         assert s1.load("LOOP")["last_status"] == "success"
         assert s2.load("LOOP")["last_status"] == "failed"
+
+
+class TestScheduledUpsertPass:
+    """Row-source scheduled upsert (11-A.4 hotfix): NBL calendar rows
+    with epoch-millis kickoffs enter as SCHEDULED rows; rows without a
+    parseable date are counted (skipped_no_date), never guessed."""
+
+    def _nbl_loop(self, db, tmp_path, rows):
+        from basketball_agent.collection.production_loop import LoopReport
+
+        sched = CollectionScheduler.__new__(CollectionScheduler)
+        sched.state = CollectorState(tmp_path / "collector")
+        sched._season_overrides = {}
+        sched._discover = lambda league: {
+            "source": "mock-nbl", "rows": rows, "season": "2026-27",
+            "extra": {}}
+        sched.state.update("NBL", status="success", source="mock-nbl",
+                           season="2026-27")
+        loop = ProductionLoop(
+            db, sched,
+            __import__(
+                "basketball_agent.agents.prediction_agent",
+                fromlist="PredictionAgent").PredictionAgent(
+                Repository(db), n_simulations=50, seed=7),
+            DecisionLog(tmp_path / "agent_log"),
+            CollectorState(tmp_path / "collector"),
+            state_dir=tmp_path / "collector")
+        return loop, LoopReport()
+
+    def _seed_nbl_teams(self, db):
+        with db.transaction() as conn:
+            for tid in ("NBL-SYD", "NBL-ADL"):
+                conn.execute(
+                    "INSERT INTO teams (team_id, league, name, abbreviation) "
+                    "VALUES (?, 'NBL', ?, ?)", (tid, tid, tid.split("-")[1]))
+
+    _FUTURE_ROW = {
+        "source_id": "36fdee6b-58ad-11f1-ac5d-19f7d3a187d4",
+        "date": "2026-10-04", "match_time": "04:00",
+        "status_raw": "upcoming",
+        "home": "Sydney Kings", "away": "Adelaide 36ers",
+        "home_id": "NBL-SYD", "away_id": "NBL-ADL",
+        "home_score": None, "away_score": None,
+    }
+
+    def test_upcoming_row_upserts_scheduled_game(self, db, tmp_path):
+        from basketball_agent.collection.ledger import SourceGameLedger
+
+        self._seed_nbl_teams(db)
+        loop, report = self._nbl_loop(db, tmp_path, [dict(self._FUTURE_ROW)])
+        loop._upsert_scheduled_pass(report, leagues=["NBL"], now=NOW)
+        assert report.upserted_scheduled == 1
+        assert report.skipped_no_date == 0
+        assert report.errors == []
+        game = Repository(db).get_game("NBL26-0001")
+        assert game is not None
+        assert game.status is GameStatus.SCHEDULED
+        assert game.game_date == datetime(2026, 10, 4, 4, 0, tzinfo=UTC)
+        assert game.home_team_id == "NBL-SYD"
+        assert game.away_team_id == "NBL-ADL"
+        ledger = SourceGameLedger(tmp_path / "collector")
+        assert ledger.game_id_for("NBL", self._FUTURE_ROW["source_id"]) \
+            == "NBL26-0001"
+
+    def test_rerun_never_duplicates(self, db, tmp_path):
+        self._seed_nbl_teams(db)
+        rows = [dict(self._FUTURE_ROW)]
+        loop, report = self._nbl_loop(db, tmp_path, rows)
+        loop._upsert_scheduled_pass(report, leagues=["NBL"], now=NOW)
+        loop._upsert_scheduled_pass(report, leagues=["NBL"], now=NOW)
+        assert report.upserted_scheduled == 1  # second pass is a no-op
+        assert report.errors == []
+
+    def test_no_date_row_counted_not_errored(self, db, tmp_path):
+        self._seed_nbl_teams(db)
+        bad = dict(self._FUTURE_ROW, source_id="bad-row",
+                   date="", match_time="")
+        loop, report = self._nbl_loop(db, tmp_path, [bad])
+        loop._upsert_scheduled_pass(report, leagues=["NBL"], now=NOW)
+        assert report.skipped_no_date == 1
+        assert report.upserted_scheduled == 0
+        assert report.errors == []          # counted, not an error flood
+        assert Repository(db).get_game("NBL26-0001") is None
+
+    def test_unknown_team_fails_own_row_only(self, db, tmp_path):
+        # team_code "BLU" is not in the teams table: the row's FK check
+        # fails in isolation, the discovery/report stay intact
+        bad_team = dict(self._FUTURE_ROW, source_id="blu-row",
+                        away_id="NBL-BLU", away="B League United")
+        loop, report = self._nbl_loop(db, tmp_path, [bad_team])
+        loop._upsert_scheduled_pass(report, leagues=["NBL"], now=NOW)
+        assert report.upserted_scheduled == 0
+        assert len(report.errors) == 1
+        assert "FOREIGN KEY" in report.errors[0]["error"]
+        assert Repository(db).get_game("NBL26-0001") is None

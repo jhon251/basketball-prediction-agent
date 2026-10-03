@@ -45,6 +45,7 @@ from basketball_agent.collection.state import CollectorState, now_utc
 class LoopReport:
     discovered: int = 0
     upserted_scheduled: int = 0
+    skipped_no_date: int = 0
     predicted: list[dict] = field(default_factory=list)
     skipped_already_predicted: int = 0
     skipped_missed_kickoff: int = 0
@@ -56,6 +57,7 @@ class LoopReport:
     def summary(self) -> str:
         return (f"discovered={self.discovered} "
                 f"upserted_scheduled={self.upserted_scheduled} "
+                f"skipped_no_date={self.skipped_no_date} "
                 f"predicted={len(self.predicted)} "
                 f"already_predicted={self.skipped_already_predicted} "
                 f"missed={self.skipped_missed_kickoff} "
@@ -157,6 +159,13 @@ class ProductionLoop:
                     continue  # played: enters via the season-refresh gate
                 if _has_score(r):
                     continue  # live/mid-game: not predictable either
+                if not str(r.get("date") or "").strip():
+                    # no parseable kickoff on the calendar row: a scheduled
+                    # game cannot enter the core without a date — counted,
+                    # never guessed (NBL 2026-27 rows with a blank legacy
+                    # date field surfaced as 145 per-row errors once)
+                    report.skipped_no_date += 1
+                    continue
                 game_id = f"{prefix}-{next_seq:04d}"
                 next_seq += 1
                 try:
