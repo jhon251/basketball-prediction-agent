@@ -1,0 +1,1810 @@
+{
+ "injuries": [
+  {
+   "id": "1",
+   "displayName": "Atlanta Hawks",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-19T19:38Z",
+     "athlete": {
+      "displayName": "Mouhamed Gueye",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4712863/mouhamed-gueye",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-09-21T19:50Z",
+     "athlete": {
+      "displayName": "Henri Veesaar",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5105571/henri-veesaar",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "displayName": "Boston Celtics",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-18T14:49Z",
+     "athlete": {
+      "displayName": "Devin Carter",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4433188/devin-carter",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "17",
+   "displayName": "Brooklyn Nets",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-23T21:08Z",
+     "athlete": {
+      "displayName": "Tyler Bilodeau",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5105626/tyler-bilodeau",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "30",
+   "displayName": "Charlotte Hornets",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:10Z",
+     "athlete": {
+      "displayName": "Grant Williams",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4066218/grant-williams",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:10Z",
+     "athlete": {
+      "displayName": "Coby White",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4395651/coby-white",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:10Z",
+     "athlete": {
+      "displayName": "Kon Knueppel",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5061575/kon-knueppel",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-20T20:55Z",
+     "athlete": {
+      "displayName": "Kylan Boswell",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4684269/kylan-boswell",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "4",
+   "displayName": "Chicago Bulls",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-19T17:38Z",
+     "athlete": {
+      "displayName": "Nic Claxton",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4278067/nic-claxton",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "6",
+   "displayName": "Dallas Mavericks",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T14:25Z",
+     "athlete": {
+      "displayName": "Kyrie Irving",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/6442/kyrie-irving",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:06Z",
+     "athlete": {
+      "displayName": "Caleb Martin",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3138160/caleb-martin",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:06Z",
+     "athlete": {
+      "displayName": "Jett Howard",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5105806/jett-howard",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:06Z",
+     "athlete": {
+      "displayName": "Tarik Biberovic",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5148538/tarik-biberovic",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:06Z",
+     "athlete": {
+      "displayName": "Santi Aldama",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4593125/santi-aldama",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-24T02:18Z",
+     "athlete": {
+      "displayName": "Cooper Flagg",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5041939/cooper-flagg",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-22T20:10Z",
+     "athlete": {
+      "displayName": "Dereck Lively II",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4683688/dereck-lively-ii",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "7",
+   "displayName": "Denver Nuggets",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-23T23:09Z",
+     "athlete": {
+      "displayName": "Spencer Jones",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4592427/spencer-jones",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-23T23:08Z",
+     "athlete": {
+      "displayName": "Cameron Johnson",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3138196/cameron-johnson",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-23T23:06Z",
+     "athlete": {
+      "displayName": "Alpha Diallo",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4065813/alpha-diallo",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-17T00:52Z",
+     "athlete": {
+      "displayName": "Julian Strawther",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4432181/julian-strawther",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "8",
+   "displayName": "Detroit Pistons",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:06Z",
+     "athlete": {
+      "displayName": "Ausar Thompson",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4684742/ausar-thompson",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T02:40Z",
+     "athlete": {
+      "displayName": "Jalen Duren",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4433621/jalen-duren",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "9",
+   "displayName": "Golden State Warriors",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-24T14:11Z",
+     "athlete": {
+      "displayName": "Brandin Podziemski",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4709138/brandin-podziemski",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T14:07Z",
+     "athlete": {
+      "displayName": "Stephen Curry",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3975/stephen-curry",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Charles Bassey",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4397886/charles-bassey",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-21T18:27Z",
+     "athlete": {
+      "displayName": "Kristaps Porzingis",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3102531/kristaps-porzingis",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-16T16:14Z",
+     "athlete": {
+      "displayName": "Moses Moody",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4432171/moses-moody",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-16T16:11Z",
+     "athlete": {
+      "displayName": "Jimmy Butler III",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/6430/jimmy-butler-iii",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "10",
+   "displayName": "Houston Rockets",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T15:16Z",
+     "athlete": {
+      "displayName": "Steven Adams",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/2991235/steven-adams",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T15:13Z",
+     "athlete": {
+      "displayName": "Fred VanVleet",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/2991230/fred-vanvleet",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:45Z",
+     "athlete": {
+      "displayName": "Reed Sheppard",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4711272/reed-sheppard",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "11",
+   "displayName": "Indiana Pacers",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:07Z",
+     "athlete": {
+      "displayName": "T.J. McConnell",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/2530530/tj-mcconnell",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-23T22:53Z",
+     "athlete": {
+      "displayName": "Ben Sheppard",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4433076/ben-sheppard",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-02-09T21:43Z",
+     "athlete": {
+      "displayName": "Johnny Furphy",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5157066/johnny-furphy",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "12",
+   "displayName": "LA Clippers",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-15T01:03Z",
+     "athlete": {
+      "displayName": "Bradley Beal",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/6580/bradley-beal",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-05T22:21Z",
+     "athlete": {
+      "displayName": "Max Strus",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4065778/max-strus",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-09-28T18:07Z",
+     "athlete": {
+      "displayName": "Yanic Konan Niederhauser",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5108024/yanic-konan-niederhauser",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-09-28T18:01Z",
+     "athlete": {
+      "displayName": "Brandon Ingram",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3913176/brandon-ingram",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-08-26T20:04Z",
+     "athlete": {
+      "displayName": "Jordan Miller",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4396818/jordan-miller",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "13",
+   "displayName": "Los Angeles Lakers",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Adou Thiero",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5060631/adou-thiero",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Jake LaRavia",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4592691/jake-laravia",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Cameron Carr",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5113969/cameron-carr",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "29",
+   "displayName": "Memphis Grizzlies",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:45Z",
+     "athlete": {
+      "displayName": "Cedric Coward",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4903027/cedric-coward",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "16",
+   "displayName": "Minnesota Timberwolves",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-05T20:53Z",
+     "athlete": {
+      "displayName": "Donte DiVincenzo",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3934673/donte-divincenzo",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "3",
+   "displayName": "New Orleans Pelicans",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T02:46Z",
+     "athlete": {
+      "displayName": "Yves Missi",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5061589/yves-missi",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "25",
+   "displayName": "Oklahoma City Thunder",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-23T18:52Z",
+     "athlete": {
+      "displayName": "Otega Oweh",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5106270/otega-oweh",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-21T22:13Z",
+     "athlete": {
+      "displayName": "Nikola Topic",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5159925/nikola-topic",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-21T22:08Z",
+     "athlete": {
+      "displayName": "Thomas Sorber",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5061603/thomas-sorber",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "19",
+   "displayName": "Orlando Magic",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:07Z",
+     "athlete": {
+      "displayName": "Jonathan Isaac",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4065654/jonathan-isaac",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:07Z",
+     "athlete": {
+      "displayName": "Anthony Black",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4712849/anthony-black",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T01:55Z",
+     "athlete": {
+      "displayName": "Paolo Banchero",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4432573/paolo-banchero",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-17T22:19Z",
+     "athlete": {
+      "displayName": "Noah Penda",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5214637/noah-penda",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-09-28T21:33Z",
+     "athlete": {
+      "displayName": "Izaiyah Nelson",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5107251/izaiyah-nelson",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "20",
+   "displayName": "Philadelphia 76ers",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-23T21:10Z",
+     "athlete": {
+      "displayName": "Tacko Fall",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3904625/tacko-fall",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-23T21:07Z",
+     "athlete": {
+      "displayName": "Dean Wade",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3912848/dean-wade",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-23T21:03Z",
+     "athlete": {
+      "displayName": "LeBron James",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/1966/lebron-james",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-19T21:07Z",
+     "athlete": {
+      "displayName": "Dominick Barlow",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4870562/dominick-barlow",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-06T19:17Z",
+     "athlete": {
+      "displayName": "Ariel Hukporti",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4871141/ariel-hukporti",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "21",
+   "displayName": "Phoenix Suns",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T16:44Z",
+     "athlete": {
+      "displayName": "Luke Kennard",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3913174/luke-kennard",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T00:24Z",
+     "athlete": {
+      "displayName": "Oso Ighodaro",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4601023/oso-ighodaro",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-09-11T16:03Z",
+     "athlete": {
+      "displayName": "Mark Williams",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4701232/mark-williams",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "22",
+   "displayName": "Portland Trail Blazers",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Chris Youngblood",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4706557/chris-youngblood",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:46Z",
+     "athlete": {
+      "displayName": "Branden Carlson",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4592435/branden-carlson",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-08-24T20:23Z",
+     "athlete": {
+      "displayName": "Shaedon Sharpe",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4914336/shaedon-sharpe",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "23",
+   "displayName": "Sacramento Kings",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-21T04:22Z",
+     "athlete": {
+      "displayName": "Ben Simmons",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3907387/ben-simmons",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-15T14:40Z",
+     "athlete": {
+      "displayName": "Dylan Cardwell",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4433174/dylan-cardwell",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-15T14:36Z",
+     "athlete": {
+      "displayName": "Maxime Raynaud",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4898371/maxime-raynaud",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "24",
+   "displayName": "San Antonio Spurs",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:45Z",
+     "athlete": {
+      "displayName": "Tobias Harris",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/6440/tobias-harris",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-05T21:43Z",
+     "athlete": {
+      "displayName": "Jayden Quaintance",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5101845/jayden-quaintance",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "28",
+   "displayName": "Toronto Raptors",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-10-20T18:05Z",
+     "athlete": {
+      "displayName": "Nate Bittle",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4432586/nate-bittle",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "26",
+   "displayName": "Utah Jazz",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T13:45Z",
+     "athlete": {
+      "displayName": "Trey Alexander",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4433268/trey-alexander",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-07T23:07Z",
+     "athlete": {
+      "displayName": "Jusuf Nurkic",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/3102530/jusuf-nurkic",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "27",
+   "displayName": "Washington Wizards",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-10-24T03:11Z",
+     "athlete": {
+      "displayName": "AJ Dybantsa",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/5142718/aj-dybantsa",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-10-01T19:11Z",
+     "athlete": {
+      "displayName": "Tristan Vukcevic",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4997537/tristan-vukcevic",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    },
+    {
+     "status": "Out",
+     "date": "2026-07-30T20:11Z",
+     "athlete": {
+      "displayName": "Jamir Watkins",
+      "links": [
+       {
+        "language": "en-US",
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/4606840/jamir-watkins",
+        "text": "Player Card",
+        "shortText": "Player Card",
+        "isExternal": false,
+        "isPremium": false
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -13,6 +13,22 @@ from basketball_agent.agents.decision_log import DecisionLog
 from basketball_agent.collection.scheduler import CollectionScheduler
 from basketball_agent.collection.state import CollectorState
 from basketball_agent.data.db.connection import Database
+
+
+@pytest.fixture(autouse=True)
+def _no_network_injuries(monkeypatch):
+    """Phase 12-G: the NBA pass refreshes ESPN injuries; stub it so this
+    suite keeps its no-network guarantee."""
+    from basketball_agent.data.collectors import espn_injuries
+
+    class _Stub:
+        availability_written = 0
+        records = []
+        skipped_unresolved_player = 0
+        errors = []
+
+    monkeypatch.setattr(espn_injuries, "refresh_injuries",
+                        lambda db, **kw: _Stub())
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import (
     Competition, GameStatus, League,

@@ -54,7 +54,11 @@ def _real_repo() -> Repository:
 
 
 def _acb_games(repo: Repository) -> list:
-    games = [g for g in repo.list_games() if g.league is League.ACB]
+    # FINAL only: the pinned per-season counts audit INGESTED history;
+    # production SCHEDULED rows (Phase 12-H fixtures) are a different
+    # lifecycle and must not inflate them.
+    games = [g for g in repo.list_games() if g.league is League.ACB
+             and g.status is GameStatus.FINAL]
     if not games:
         pytest.skip("ACB data not ingested yet")
     return games

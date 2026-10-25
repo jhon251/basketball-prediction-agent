@@ -46,6 +46,10 @@ class LoopReport:
     discovered: int = 0
     upserted_scheduled: int = 0
     skipped_no_date: int = 0
+    nba_upserted: int = 0
+    nba_finalized: int = 0
+    acb_upserted: int = 0
+    acb_finalized: int = 0
     predicted: list[dict] = field(default_factory=list)
     skipped_already_predicted: int = 0
     skipped_missed_kickoff: int = 0
@@ -58,6 +62,10 @@ class LoopReport:
         return (f"discovered={self.discovered} "
                 f"upserted_scheduled={self.upserted_scheduled} "
                 f"skipped_no_date={self.skipped_no_date} "
+                f"nba_upserted={self.nba_upserted} "
+                f"nba_finalized={self.nba_finalized} "
+                f"acb_upserted={self.acb_upserted} "
+                f"acb_finalized={self.acb_finalized} "
                 f"predicted={len(self.predicted)} "
                 f"already_predicted={self.skipped_already_predicted} "
                 f"missed={self.skipped_missed_kickoff} "
@@ -102,6 +110,10 @@ class ProductionLoop:
                                     for r in results)
 
         self._upsert_scheduled_pass(report, leagues=leagues, now=now)
+        if leagues is None or "NBA" in leagues:
+            self._nba_fixtures_pass(report, now=now)
+        if leagues is None or "ACB" in leagues:
+            self._acb_fixtures_pass(report, now=now)
         self._prediction_pass(report, now=now, leagues=leagues,
                               max_predictions=max_predictions)
         self._settlement_pass(report, leagues=leagues)
@@ -200,6 +212,101 @@ class ProductionLoop:
                         "stage": "upsert", "league": league,
                         "source_id": source_id, "error": str(exc)})
             report.upserted_scheduled += upserted
+
+    # ----------------------------------------------------- NBA fixtures pass
+    def _nba_fixtures_pass(self, report: LoopReport, *, now: datetime) -> None:
+        """ESPN scoreboard lifecycle for NBA rows (Phase 12-B).
+
+        Delegates to ``collection.nba_fixtures.apply_nba_rows`` (the same
+        implementation the API layer uses); rows come from the scheduler's
+        ``_discover("NBA")`` seam (mocked in tests, ESPN live).  ``now`` is
+        accepted for signature symmetry — application is idempotent via the
+        ledger, not time-gated.
+        """
+        from basketball_agent.collection.nba_fixtures import apply_nba_rows
+        from basketball_agent.data.db.repository import Repository
+
+        try:
+            discovered = self._scheduler.discover_rows("NBA")
+        except Exception as exc:  # noqa: BLE001 — network isolation
+            report.errors.append({"stage": "nba_fixtures", "league": "NBA",
+                                  "error": str(exc)})
+            return
+        delta = apply_nba_rows(
+            Repository(self._db), self._ledger, self._state,
+            discovered.get("rows", []))
+        report.nba_upserted += delta.upserted
+        report.nba_finalized += delta.finalized
+        report.skipped_no_date += delta.skipped_no_date
+        report.errors.extend(delta.errors)
+        # Phase 12-G: best-effort injury refresh on the same pass — an
+        # ESPN injuries outage never blocks fixtures/predictions.  Called
+        # through the module so tests can monkeypatch it offline.
+        try:
+            from basketball_agent.data.collectors import espn_injuries
+            injury = espn_injuries.refresh_injuries(self._db)
+            if injury.errors:
+                report.errors.extend(
+                    {"stage": "nba_injuries", "league": "NBA", "error": e}
+                    for e in injury.errors[:5])
+        except Exception as exc:  # noqa: BLE001 — network isolation
+            report.errors.append({"stage": "nba_injuries", "league": "NBA",
+                                  "error": str(exc)})
+
+    # ------------------------------------------------------ ACB fixtures pass
+    def _acb_fixtures_pass(self, report: LoopReport, *, now: datetime) -> None:
+        """ACB season calendar lifecycle (Phase 12-H).
+
+        ``ACB{yyyy}-{source_id}`` ids match the season-refresh convention
+        (unlike the sequential NBA/CBA scheme), so the later deep refresh
+        reuses these rows instead of duplicating them.  Rows come from the
+        scheduler's ``_discover("ACB")`` seam; failures are isolated.
+        """
+        from basketball_agent.collection.nba_fixtures import (
+            apply_fixtures_rows,
+        )
+        from basketball_agent.data.db.repository import Repository
+
+        try:
+            discovered = self._scheduler.discover_rows("ACB")
+        except Exception as exc:  # noqa: BLE001 — network isolation
+            report.errors.append({"stage": "acb_fixtures", "league": "ACB",
+                                  "error": str(exc)})
+            return
+        # edition-scoped team ids -> stable clubId -> ACB-<CODE> (the
+        # bridge is cached; clubs with no played match yet error loudly
+        # per row and resolve on a later pass — never guessed)
+        from basketball_agent.data.collectors.acb_api import resolve_team
+        from basketball_agent.collection.sources import acb_edition_team_map
+        try:
+            edition_map = acb_edition_team_map(cache_dir=self._state_dir)
+        except Exception as exc:  # noqa: BLE001 — bridge is best-effort
+            report.errors.append({"stage": "acb_fixtures", "league": "ACB",
+                                  "error": f"edition team map: {exc}"})
+            return
+        rows = []
+        for r in discovered.get("rows", []):
+            r = dict(r)
+            try:
+                bridge = (edition_map.get(str(r["home_id"]))
+                          or {}).get("club")
+                away_bridge = (edition_map.get(str(r["away_id"]))
+                               or {}).get("club")
+                r["home_id"] = resolve_team(bridge)
+                r["away_id"] = resolve_team(away_bridge)
+            except Exception as exc:  # noqa: BLE001 — per-row isolation
+                report.errors.append({
+                    "stage": "acb_fixtures", "league": "ACB",
+                    "source_id": r.get("source_id"), "error": str(exc)})
+                continue
+            rows.append(r)
+        delta = apply_fixtures_rows(
+            Repository(self._db), self._ledger, self._state,
+            rows, league="ACB", id_scheme="source")
+        report.acb_upserted += delta.upserted
+        report.acb_finalized += delta.finalized
+        report.skipped_no_date += delta.skipped_no_date
+        report.errors.extend(delta.errors)
 
     # ------------------------------------------------------ prediction pass
     def _prediction_pass(self, report: LoopReport, *, now: datetime,

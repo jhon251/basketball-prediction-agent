@@ -142,7 +142,11 @@ def audit_league(
             "pass either expected_regular_season_games or "
             "expected_regular_by_season, not both"
         )
-    games = [g for g in repo.list_games() if g.league is league]
+    # Audits measure INGESTED (settled) data only: production SCHEDULED
+    # rows are a different lifecycle (Phase 12-H fixtures) with no stats
+    # to reconcile -- counting them would inflate every per-season pin.
+    games = [g for g in repo.list_games() if g.league is league
+             and g.status is GameStatus.FINAL]
     checks: list[AuditCheck] = []
 
     # 1) game_id format + uniqueness ---------------------------------------

@@ -100,28 +100,52 @@ class CollectionScheduler:
                     "season": f"{year}-{str((year + 1) % 100).zfill(2)}",
                     "rows": rows, "extra": {"year": year}}
         if league == "CBA":
+            # Phase 12-H: upcoming fixtures as rows (same shape the
+            # BSL/NBL upsert consumes); deep history stays on the season
+            # refresh.  Window: current + next month (the day-level API
+            # is called once per calendar day, so keep the window tight).
             season = src.cba_current_season()
             year = int(season["season_value"])
-            counts = src.cba_recent_schedule_counts(
-                [(year, 10), (year, 11), (year, 12),
-                 (year + 1, 1), (year + 1, 2), (year + 1, 3)])
+            now_ = datetime.now(timezone.utc)
+            months = [(now_.year, now_.month)]
+            ny, nm = (now_.year + 1, 1) if now_.month == 12 else (
+                now_.year, now_.month + 1)
+            months.append((ny, nm))
+            counts = src.cba_recent_schedule_counts(months)
+            rows = src.cba_schedule_rows(season["season_value"], months)
             return {"source": "cbaleague.com official data-server",
-                    "season": season["season"], "rows": [],
+                    "season": season["season"], "rows": rows,
                     "extra": {"scheduled_counts": counts,
                               "season_value": season["season_value"]}}
         if league == "NBA":
+            # Phase 12-B: ESPN scoreboard supplies UPCOMING fixtures as
+            # rows (same shape as BSL/NBL/CBA); deep history stays on the
+            # manual parquet refresh (freshness still reported).
+            from basketball_agent.data.collectors.nba_scoreboard import (
+                fetch_upcoming_rows,
+            )
             fresh = src.nba_source_freshness()
-            return {"source": "llimllib/nba_data (parquet file source)",
-                    "rows": [], "extra": fresh,
+            try:
+                rows = fetch_upcoming_rows(n_days=8)
+            except Exception as exc:  # noqa: BLE001 — network boundary
+                raise RuntimeError(
+                    f"ESPN scoreboard fetch failed: {exc}") from exc
+            seasons = sorted({r["season"] for r in rows if r.get("season")})
+            return {"source": "site.api.espn.com public scoreboard",
+                    "season": seasons[-1] if seasons else None,
+                    "rows": rows, "extra": fresh,
                     "manual_refresh": True}
         if league == "EUROLEAGUE":
             probe = src.euroleague_reachable()
             return {"source": "live.euroleague.net API", "rows": [],
                     "extra": probe, "manual_refresh": True}
         if league == "ACB":
-            listing = src.acb_seasons()
-            return {"source": "acb official API (season listing)", "rows": [],
-                    "extra": listing, "manual_refresh": True}
+            # Phase 12-H: season calendar (one call) flattened to rows;
+            # Liga ACB regular edition is competitionId 111 (verified in
+            # the Phase 8-B6 fetcher).
+            rows, season_label, extra = src.acb_schedule_rows()
+            return {"source": "api2.acb.com season calendar",
+                    "season": season_label, "rows": rows, "extra": extra}
         raise RuntimeError(f"no collector registered for league {league!r}")
 
     # ------------------------------------------------------------ row access

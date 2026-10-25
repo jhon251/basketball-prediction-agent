@@ -180,6 +180,46 @@ class Repository:
             self._upsert_player(conn, player)
 
     def insert_game(self, game: Game, inserted_at: datetime | None = None) -> None:
+        ts = inserted_at or datetime.now(timezone.utc)
+        with self._db.transaction() as conn:
+            self._insert_game(conn, game, ts)
+        self._invalidate()
+
+    def update_game_result(
+        self, game_id: str, *, home_score: int, away_score: int,
+        status: GameStatus = GameStatus.FINAL,
+    ) -> Game:
+        """Attach a final score to an existing non-final game row.
+
+        Phase 12-B settlement path for ESPN-sourced NBA scheduled games:
+        the scoreboard reports final scores before the parquet season
+        refresh lands.  Fail-loud guards: the row must exist, must not
+        already be FINAL (a conflicting second result is a data problem,
+        never silently overwritten), and scores must be non-negative.
+        """
+        if home_score < 0 or away_score < 0:
+            raise ValueError(
+                f"scores must be >= 0, got {home_score}-{away_score}")
+        with self._db.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM games WHERE game_id = ?", (game_id,)).fetchone()
+            if row is None:
+                raise LookupError(f"game {game_id!r} not found")
+            current = _game_from_row(row)
+            if current.status is GameStatus.FINAL:
+                raise ValueError(
+                    f"game {game_id!r} is already FINAL "
+                    f"({current.home_score}-{current.away_score}); "
+                    "refusing to overwrite with "
+                    f"{home_score}-{away_score}")
+            conn.execute(
+                "UPDATE games SET home_score = ?, away_score = ?, "
+                "status = ? WHERE game_id = ?",
+                (home_score, away_score, status.value, game_id))
+        self._invalidate()
+        updated = self.get_game(game_id)
+        assert updated is not None
+        return updated
         self._invalidate()
         inserted_at = inserted_at or datetime.now(timezone.utc)
         with self._db.transaction() as conn:
@@ -292,10 +332,24 @@ class Repository:
             row = conn.execute("SELECT * FROM teams WHERE team_id = ?", (team_id,)).fetchone()
         return _team_from_row(row) if row else None
 
+    def list_teams(self) -> list[Team]:
+        """All teams, ordered by team_id (Phase 12-C API layer)."""
+        with self._db.session() as conn:
+            rows = conn.execute(
+                "SELECT * FROM teams ORDER BY team_id ASC").fetchall()
+        return [_team_from_row(r) for r in rows]
+
     def get_player(self, player_id: str) -> Player | None:
         with self._db.session() as conn:
             row = conn.execute("SELECT * FROM players WHERE player_id = ?", (player_id,)).fetchone()
         return _player_from_row(row) if row else None
+
+    def list_players(self) -> list[Player]:
+        """All players, ordered by player_id (Phase 12-G ingest)."""
+        with self._db.session() as conn:
+            rows = conn.execute(
+                "SELECT * FROM players ORDER BY player_id ASC").fetchall()
+        return [_player_from_row(r) for r in rows]
 
     def get_game(self, game_id: str) -> Game | None:
         self._cached_games()

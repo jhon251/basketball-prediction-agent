@@ -17,14 +17,30 @@ SEVERITY_HIGH = "HIGH"
 SEVERITY_MEDIUM = "MEDIUM"
 SEVERITY_LOW = "LOW"
 
+# Recalibrated 2026-10-24 (Phase 12-F): per-league p90 of the simulated
+# margin std, measured on 25 recent real regular-season games per league
+# (frozen params, 400 sims, seed=7; NBA p50 16.0 / NBL 14.6 / EL 13.9).
+# The previous global 15.0 threshold flagged EVERY NBA game (std range
+# 15.2–16.8) — a constant false alarm carrying no information.
+MARGIN_STD_P90_BY_LEAGUE: dict[str, float] = {
+    "NBA": 16.8,
+    "CBA": 15.9,
+    "NBL": 15.4,
+    "BSL": 14.8,
+    "ACB": 14.7,
+    "EUROLEAGUE": 14.4,
+}
+
 
 @dataclass(frozen=True)
 class RiskConfig:
     close_margin_threshold: float = 3.0
     model_disagreement_threshold: float = 0.10
-    # Calibrated against the V1 simulator's score variance (no clock/endgame
-    # smoothing yet); revisit once real data calibration lands (Phase 5+).
+    # Fallback for leagues without a measured entry (all six core leagues
+    # are measured above); p90 of the simulated margin std distribution.
     margin_std_threshold: float = 15.0
+    # Optional per-league overrides; None -> MARGIN_STD_P90_BY_LEAGUE.
+    margin_std_threshold_by_league: dict[str, float] | None = None
     availability_warning: float = 0.9
     availability_high: float = 0.75
     min_sample_games: int = 10
@@ -90,12 +106,20 @@ class RiskAgent:
                 f"{cfg.model_disagreement_threshold:.0%}",
             ))
 
-        # 3) high outcome variance
-        if mc.margin.std > cfg.margin_std_threshold:
+        # 3) high outcome variance — per-league p90 threshold (see
+        # MARGIN_STD_P90_BY_LEAGUE provenance above); unlisted leagues
+        # fall back to the scalar default.
+        table = (cfg.margin_std_threshold_by_league
+                 if cfg.margin_std_threshold_by_league is not None
+                 else MARGIN_STD_P90_BY_LEAGUE)
+        league_name = getattr(features, "game_league", None)
+        std_threshold = (table.get(str(league_name), cfg.margin_std_threshold)
+                         if league_name else cfg.margin_std_threshold)
+        if mc.margin.std > std_threshold:
             flags.append(RiskFlag(
                 "high_variance", SEVERITY_MEDIUM,
                 f"simulated margin std ({mc.margin.std:.1f}) exceeds "
-                f"{cfg.margin_std_threshold:.1f}",
+                f"{std_threshold:.1f} (league {league_name or 'default'} p90)",
             ))
 
         # 4) injury / availability uncertainty

@@ -367,6 +367,44 @@ def _build_parser() -> argparse.ArgumentParser:
     ea.add_argument("--family", default=None,
                     help="filter by primary family (decision-log source)")
 
+    sv = sub.add_parser("serve",
+                        help="run the local JSON API + web UI (Phase 12-D)")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--n-simulations", type=int, default=None,
+                    help="Monte Carlo runs per request "
+                         "(default from settings)")
+    sv.add_argument("--open", action="store_true",
+                    help="open the UI in the default browser on startup")
+
+    cc = sub.add_parser(
+        "confidence-calibrate",
+        help="build the empirical hit-rate-by-bucket table (Phase 12-F; "
+             "frozen walk-forward, writes storage/calibration JSON)")
+    cc.add_argument("--leagues", default=None,
+                    help="comma list (default: all six core leagues)")
+    cc.add_argument("--start", default="2022-10-01",
+                    help="window start YYYY-MM-DD")
+    cc.add_argument("--end", default=None, help="window end (exclusive)")
+    cc.add_argument("--n-simulations", type=int, default=300)
+    cc.add_argument("--out", default=None,
+                    help="output JSON path (default: "
+                         "storage/calibration/confidence_calibration.json)")
+
+    ip = sub.add_parser(
+        "ingest-players",
+        help="ingest llimllib playerlog_<season>.parquet (+ optional roster) "
+             "so minute weights / injury flags work (Phase 12-G)")
+    ip.add_argument("file", help="playerlog parquet path")
+    ip.add_argument("--roster", default=None, help="players_<year>.parquet")
+
+    ni = sub.add_parser(
+        "nba-injuries",
+        help="fetch the ESPN injury report and attach availability rows to "
+             "upcoming NBA games (Phase 12-G)")
+    ni.add_argument("--days", type=int, default=8,
+                    help="upcoming-game window (default 8)")
+
     return parser
 
 
@@ -491,8 +529,116 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_evaluate(args)
     if args.command == "error-analysis":
         return _cmd_error_analysis(args)
+    if args.command == "serve":
+        return _cmd_serve(args)
+    if args.command == "confidence-calibrate":
+        return _cmd_confidence_calibrate(args)
+    if args.command == "ingest-players":
+        return _cmd_ingest_players(args)
+    if args.command == "nba-injuries":
+        return _cmd_nba_injuries(args)
 
     return 2
+
+
+def _cmd_ingest_players(args) -> int:
+    from basketball_agent.collection.player_data import (
+        ingest_playerlog_files,
+    )
+
+    db, _ = _open_db()
+    result, bundle = ingest_playerlog_files(db, args.file, args.roster)
+    print(f"players written:   {result.players_written}")
+    print(f"stats written:     {result.stats_written}")
+    print(f"skipped existing:  {result.stats_skipped_existing}")
+    print(f"failed:            {result.stats_failed}")
+    print(f"skipped unknown game (not in DB): {bundle.skipped_unknown_game}")
+    print(f"skipped no minutes (DNP):         {bundle.skipped_no_minutes}")
+    for err in result.errors[:10]:
+        print(f"  ERROR {err}")
+    return 1 if result.errors or result.stats_failed else 0
+
+
+def _cmd_nba_injuries(args) -> int:
+    from basketball_agent.data.collectors.espn_injuries import refresh_injuries
+
+    db, _ = _open_db()
+    result = refresh_injuries(db, window_days=args.days)
+    print(f"injury records:       {len(result.records)}")
+    print(f"availability written: {result.availability_written}")
+    print(f"unresolved players:   {result.skipped_unresolved_player}")
+    print(f"skipped existing:     {result.skipped_existing}")
+    for err in result.errors[:10]:
+        print(f"  ERROR {err}")
+    return 1 if result.errors else 0
+
+
+def _cmd_confidence_calibrate(args) -> int:
+    from datetime import timezone as _tz
+
+    from basketball_agent.data.schemas.base import League
+    from basketball_agent.evaluation.confidence_calibration import (
+        FAMILIES, build_family_table, build_payload, default_calibration_path,
+        save_payload,
+    )
+    from basketball_agent.evaluation.market_baseline import walk_forward_entries
+
+    settings = get_settings()
+    db, _ = _open_db()
+    default_leagues = "NBA,EUROLEAGUE,ACB,NBL,CBA,BSL"
+    leagues = [x.strip().upper() for x in
+               (args.leagues or default_leagues).split(",") if x.strip()]
+    start = datetime.fromisoformat(args.start + "T00:00:00").replace(
+        tzinfo=_tz.utc)
+    end = (datetime.fromisoformat(args.end + "T00:00:00").replace(
+        tzinfo=_tz.utc) if args.end else None)
+
+    tables: dict[str, dict[str, list[dict]]] = {}
+    windows: dict[str, list[str]] = {}
+    for name in leagues:
+        entries = walk_forward_entries(
+            db, start, end, league=League(name),
+            n_simulations=args.n_simulations)
+        tables[name] = {fam: build_family_table(entries, fam)
+                        for fam in FAMILIES}
+        windows[name] = [args.start, args.end or "latest"]
+        print(f"{name}: {len(entries)} walk-forward entries")
+        for fam in FAMILIES:
+            rows = tables[name][fam]
+            if rows:
+                wide = max(rows, key=lambda r: r["n"])
+                print(f"  {fam:<10} buckets={len(rows)} "
+                      f"largest {wide['bucket']} n={wide['n']} "
+                      f"rate={wide['rate']:.3f}")
+    payload = build_payload(tables, windows=windows,
+                            n_simulations=args.n_simulations, seed=7)
+    out = Path(args.out) if args.out else default_calibration_path(
+        settings.db_path)
+    save_payload(payload, out)
+    print(f"saved: {out}")
+    return 0
+
+
+def _cmd_serve(args) -> int:
+    from pathlib import Path as _Path
+
+    from basketball_agent.api.server import serve as _serve
+
+    settings = get_settings()
+    db, _ = _open_db()
+    state_dir = _Path(settings.db_path).parent / "collector"
+    if getattr(args, "open", False):
+        import threading
+        import webbrowser
+
+        url = f"http://{args.host}:{args.port}/"
+        threading.Timer(
+            1.2, webbrowser.open, args=(url,)).start()
+    _serve(args.host, args.port, db, state_dir=state_dir,
+           n_simulations=(args.n_simulations
+                          or settings.default_n_simulations),
+           seed=settings.default_seed)
+    return 0
 
 
 def _eval_filter(args):

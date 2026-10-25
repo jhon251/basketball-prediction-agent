@@ -163,7 +163,9 @@ class TestLeagueAuditFailures:
         check = next(c for c in audit.checks if c.name == "missing.games")
         assert check.status == FAIL
 
-    def test_live_game_with_scores_fails_final_consistency(self, el_db):
+    def test_live_game_with_scores_not_audited(self, el_db):
+        # non-FINAL rows are out of audit scope: a LIVE row with scores
+        # must neither inflate counts nor trip final.consistency
         repo = Repository(el_db)
         repo.insert_game(Game(
             game_id="E2024-0093", league=League.EUROLEAGUE, season="2024-25",
@@ -173,7 +175,8 @@ class TestLeagueAuditFailures:
             competition=Competition.REGULAR_SEASON,
         ))
         audit = audit_league(repo, League.EUROLEAGUE, leakage_sample=0)
-        assert any(c.name == "final.consistency" and c.status == FAIL for c in audit.checks)
+        assert not any(c.name == "final.consistency" and c.status == FAIL
+                       for c in audit.checks)
 
     def test_untagged_competition_warns_but_does_not_fail(self, el_db):
         repo = Repository(el_db)

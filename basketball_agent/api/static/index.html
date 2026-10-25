@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>篮球赛前预测 Agent</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --home: #58a6ff; --away: #f78166;
+    --good: #3fb950; --warn: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+         padding: 24px; max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  select, input { background: var(--bg); color: var(--text);
+                  border: 1px solid var(--line); border-radius: 6px;
+                  padding: 7px 10px; font-size: 14px; min-width: 160px; }
+  input[type=number] { min-width: 110px; }
+  button { background: #1f6feb; border: none; color: white; font-size: 14px;
+           padding: 8px 22px; border-radius: 6px; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line);
+                 color: var(--muted); padding: 6px 12px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .error { color: var(--away); font-size: 13px; margin-top: 10px;
+           white-space: pre-wrap; }
+  .match { display: flex; align-items: center; justify-content: center;
+           gap: 14px; margin: 8px 0 2px; }
+  .match .side { font-size: 20px; font-weight: 600; }
+  .match .at { color: var(--muted); }
+  .kickoff { text-align: center; color: var(--muted); font-size: 12px; }
+  .bars { margin: 14px 0 6px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .bar-label { width: 52px; font-size: 13px; }
+  .bar-track { flex: 1; height: 22px; background: var(--bg);
+               border-radius: 5px; overflow: hidden; display: flex; }
+  .bar-fill { height: 100%; display: flex; align-items: center;
+              justify-content: center; font-size: 12px; color: #0d1117;
+              font-weight: 600; }
+  .fill-home { background: var(--home); }
+  .fill-away { background: var(--away); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit,
+           minmax(210px, 1fr)); gap: 12px; margin-top: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .card h3 { font-size: 12px; color: var(--muted); font-weight: 500;
+             margin-bottom: 6px; }
+  .card .big { font-size: 22px; font-weight: 600; }
+  .kv { font-size: 13px; color: var(--muted); }
+  .kv b { color: var(--text); font-weight: 600; }
+  .flags { list-style: none; margin-top: 6px; }
+  .flags li { font-size: 12px; padding: 3px 8px; border-radius: 4px;
+              background: var(--bg); margin-top: 4px; }
+  .flags .HIGH { color: var(--away); }
+  .flags .MEDIUM { color: var(--warn); }
+  .flags .LOW { color: var(--muted); }
+  table.fam { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.fam td, table.fam th { padding: 4px 6px; text-align: left;
+                               border-bottom: 1px solid var(--line); }
+  table.fam th { color: var(--muted); font-weight: 500; }
+  details { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  details li { margin-left: 16px; margin-top: 3px; }
+  .sched { list-style: none; max-height: 260px; overflow-y: auto; }
+  .sched li { padding: 6px 8px; border-bottom: 1px solid var(--line);
+              cursor: pointer; font-size: 13px; display: flex;
+              justify-content: space-between; gap: 8px; }
+  .sched li:hover { background: var(--bg); }
+  .sched .lg { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .spin { display: inline-block; width: 13px; height: 13px;
+          border: 2px solid var(--line); border-top-color: var(--home);
+          border-radius: 50%; animation: r 0.8s linear infinite;
+          vertical-align: -2px; margin-right: 6px; }
+  @keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<h1>篮球赛前预测 Agent</h1>
+<div class="sub">统计模型 + Monte Carlo · 每个概率都来自历史数据、公式或模拟（规格书 §2：无 LLM 生成概率）</div>
+
+<div class="panel">
+  <div class="row">
+    <div><label>联赛</label><select id="league"></select></div>
+    <div><label>主队</label><select id="home"></select></div>
+    <div><label>客队</label><select id="away"></select></div>
+    <div><label>让分（主队视角，让5.5填-5.5）</label>
+      <input id="line" type="number" step="0.5" placeholder="如 -5.5"></div>
+    <button id="go">预测</button>
+    <button id="refresh" class="ghost">刷新 NBA 赛程</button>
+  </div>
+  <div class="error" id="err"></div>
+</div>
+
+<div class="panel" id="result" style="display:none">
+  <div class="match"><span class="side" id="m-away" style="color:var(--away)"></span>
+    <span class="at">@</span>
+    <span class="side" id="m-home" style="color:var(--home)"></span></div>
+  <div class="kickoff" id="m-kick"></div>
+  <div class="bars">
+    <div class="bar-row"><span class="bar-label">主胜</span>
+      <div class="bar-track"><div class="bar-fill fill-home" id="bar-home"></div></div></div>
+    <div class="bar-row"><span class="bar-label">客胜</span>
+      <div class="bar-track"><div class="bar-fill fill-away" id="bar-away"></div></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h3>让分盘</h3><div id="spread" class="kv">未输入让分线</div></div>
+    <div class="card"><h3>预期比分 / 分差 / 总分</h3><div id="exp" class="kv"></div></div>
+    <div class="card"><h3>把握（该档位历史命中率）</h3><div class="big" id="conf"></div>
+      <div class="kv" id="conf-sub"></div></div>
+    <div class="card"><h3>风险检查</h3><div class="big" id="flags-n"></div>
+      <ul class="flags" id="flags"></ul></div>
+    <div class="card"><h3>伤停（赛前报告）</h3><div id="injury" class="kv">无记录</div></div>
+    <div class="card"><h3>模型家族对比（主胜概率）</h3><table class="fam" id="fam"></table></div>
+  </div>
+  <details><summary>口径与限制</summary><ul id="limits"></ul></details>
+</div>
+
+<div class="panel">
+  <div class="row" style="justify-content:space-between">
+    <h3 style="font-size:14px">近期赛程（点击填入对阵）</h3>
+    <span class="note" id="sched-note"></span>
+  </div>
+  <ul class="sched" id="sched"></ul>
+  <div class="note">置信度是模型自报的校准指标，不等于对博彩市场的优势；NBA 上模型通常难以超越去水收盘线（见 docs/PHASE11_A）。</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let TEAMS = {};
+
+async function jfetch(url, opts) {
+  const r = await fetch(url, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || (r.status + ' ' + r.statusText));
+  return body;
+}
+
+function fillLeagues(leagues) {
+  TEAMS = leagues;
+  const lg = $('league');
+  lg.innerHTML = '';
+  for (const name of Object.keys(leagues).sort()) {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    lg.appendChild(o);
+  }
+  if (leagues['NBA']) lg.value = 'NBA';
+  fillTeams();
+}
+
+function fillTeams() {
+  const lg = $('league').value;
+  const opts = (TEAMS[lg] || []).map(t => {
+    const label = t.name_cn ? `${t.name_cn} ${t.name}` : t.name;
+    return `<option value="${t.team_id}">${label}</option>`;
+  }).join('');
+  $('home').innerHTML = opts;
+  $('away').innerHTML = opts;
+  if ((TEAMS[lg] || []).length > 1) $('away').selectedIndex = 1;
+}
+
+async function loadTeams() { fillLeagues((await jfetch('/api/teams')).leagues); }
+
+async function loadSchedule(refreshNba) {
+  $('sched-note').textContent = '加载中…';
+  try {
+    const q = refreshNba ? '?refresh_nba=1&days=8' : '?days=7';
+    const out = await jfetch('/api/schedule' + q);
+    const ul = $('sched');
+    ul.innerHTML = '';
+    for (const g of out.games.slice(0, 60)) {
+      const li = document.createElement('li');
+      const name = t => t.name_cn || t.name;
+      const when = new Date(g.kickoff);
+      li.innerHTML = `<span>${name(g.away)} @ ${name(g.home)}</span>
+        <span class="lg">${g.league} · ${when.toLocaleString('zh-CN',
+          {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}</span>`;
+      li.onclick = () => {
+        $('league').value = g.league; fillTeams();
+        $('home').value = g.home.team_id; $('away').value = g.away.team_id;
+        window.scrollTo({top: 0, behavior: 'smooth'});
+      };
+      ul.appendChild(li);
+    }
+    $('sched-note').textContent = `${out.games.length} 场未来比赛`
+      + (out.refresh ? ` · NBA 刷新 +${out.refresh.upserted}` : '');
+  } catch (e) { $('sched-note').textContent = '赛程加载失败: ' + e.message; }
+}
+
+async function predict() {
+  const err = $('err'); err.textContent = '';
+  const btn = $('go'); btn.disabled = true;
+  const oldLabel = btn.textContent;
+  btn.innerHTML = '<span class="spin"></span>模拟中…';
+  try {
+    const body = {league: $('league').value,
+                  home: $('home').value, away: $('away').value};
+    const line = $('line').value;
+    if (line !== '') body.home_line = parseFloat(line);
+    const out = await jfetch('/api/predict', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)});
+    render(out);
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = oldLabel;
+  }
+}
+
+function render(out) {
+  $('result').style.display = '';
+  const nm = t => t.name_cn ? `${t.name_cn} (${t.name})` : t.name;
+  $('m-home').textContent = nm(out.game.home);
+  $('m-away').textContent = nm(out.game.away);
+  const ko = new Date(out.game.kickoff);
+  $('m-kick').textContent =
+    `${out.game.league} ${out.game.game_id} · 开球 ${ko.toLocaleString('zh-CN')}`
+    + ` · 主家族 ${out.win_probability.primary_family}`
+    + ` · ${out.n_simulations.toLocaleString()} 次模拟`;
+  const ph = out.win_probability.home, pa = out.win_probability.away;
+  $('bar-home').style.width = (ph * 100).toFixed(1) + '%';
+  $('bar-home').textContent = (ph * 100).toFixed(1) + '%';
+  $('bar-away').style.width = (pa * 100).toFixed(1) + '%';
+  $('bar-away').textContent = (pa * 100).toFixed(1) + '%';
+
+  const sp = out.spread;
+  $('spread').innerHTML = sp ? (() => {
+    const pick = sp.default_source === 'elo_normal' ? sp.elo_normal : sp.simulation_samples;
+    const alt  = sp.default_source === 'elo_normal' ? sp.simulation_samples : sp.elo_normal;
+    const pct = x => (x == null) ? '—' : (x * 100).toFixed(1) + '%';
+    let html = `<b>${sp.home_line > 0 ? '主队受让' : '主队让'} ${Math.abs(sp.home_line)}</b><br>`
+      + `主队赢盘 <b>${pct(pick.home_cover)}</b> · 走盘 ${pct(pick.push)} · 输盘 ${pct(pick.away_cover)}<br>`
+      + `<span style="color:var(--muted)">口径: ${sp.default_source === 'elo_normal'
+          ? 'Elo 胜率→分差正态' : 'Monte Carlo 分差样本'}`
+      + (alt ? ` ｜ 另一口径: 赢盘 ${pct(alt.home_cover)}` : '') + '</span>';
+    return html;
+  })() : '未输入让分线（主队视角，让 5.5 填 -5.5）';
+
+  $('exp').innerHTML =
+    `<b>${out.expected.home_score.toFixed(1)} : ${out.expected.away_score.toFixed(1)}</b><br>`
+    + `分差 <b>${out.expected.margin >= 0 ? '+' : ''}${out.expected.margin.toFixed(1)}</b>`
+    + ` · 总分 <b>${out.expected.total.toFixed(1)}</b><br>`
+    + `分差 P5–P95: ${out.margin_distribution.p5} ~ ${out.margin_distribution.p95}`;
+
+  const cal = out.calibration;
+  const c = out.risk.confidence;
+  if (cal) {
+    const side = cal.picked_side_is_home
+      ? nm(out.game.home) : nm(out.game.away);
+    $('conf').textContent = (cal.empirical_hit_rate * 100).toFixed(1) + '%';
+    $('conf').style.color = cal.empirical_hit_rate >= 0.65 ? 'var(--good)'
+                          : cal.empirical_hit_rate >= 0.55 ? 'var(--warn)'
+                          : 'var(--away)';
+    const hits = Math.round(cal.empirical_hit_rate * cal.n);
+    $('conf-sub').innerHTML =
+      `所选一方（<b>${side}</b>）概率档位 <b>${cal.bucket}</b><br>` +
+      `同档位历史命中 <b>${cal.n} 场中 ${hits} 场</b><br>` +
+      `<span style="color:var(--muted)">风险检查分 ${c.toFixed(0)}/100（仅供参考）</span>`;
+  } else {
+    $('conf').textContent = c.toFixed(0) + '/100';
+    $('conf').style.color = c >= 75 ? 'var(--good)' : c >= 50 ? 'var(--warn)'
+                          : 'var(--away)';
+    $('conf-sub').innerHTML =
+      '风险检查分（未做命中率校准）<br><span style="color:var(--muted)">运行 '
+      + '<code>confidence-calibrate</code> 可生成真实命中率表</span>';
+  }
+
+  const nFlags = out.risk.flags.length;
+  $('flags-n').textContent = nFlags === 0 ? '全部通过' : `触发 ${nFlags} 项`;
+  $('flags-n').style.color = nFlags === 0 ? 'var(--good)'
+                           : nFlags === 1 ? 'var(--warn)' : 'var(--away)';
+  $('flags').innerHTML = out.risk.flags.map(f =>
+    `<li class="${f.severity}">[${f.severity}] ${f.code} — ${f.message}</li>`
+  ).join('') || '<li class="LOW">无风险旗标</li>';
+
+  const av = out.availability;
+  if (av && av.records && av.records.length) {
+    const rows = av.records.map(r =>
+      `<li class="${r.probability === 0 ? 'HIGH' : 'LOW'}">` +
+      `${r.player} — <b>${r.status}</b>（出场概率 ${(r.probability*100).toFixed(0)}%）</li>`
+    ).join('');
+    $('injury').innerHTML =
+      `可出场份额: 主 <b>${(av.home_share*100).toFixed(1)}%</b> / ` +
+      `客 <b>${(av.away_share*100).toFixed(1)}%</b>` +
+      `<ul class="flags">${rows}</ul>`;
+  } else {
+    $('injury').innerHTML = '无伤停记录（或该联赛未接入伤停源）';
+  }
+
+  $('fam').innerHTML = '<tr><th>家族</th><th>主胜</th></tr>' +
+    Object.entries(out.families).map(([k, v]) =>
+      `<tr><td>${k}${k === out.win_probability.primary_family ? ' ★' : ''}</td>`
+      + `<td><b>${(v * 100).toFixed(1)}%</b></td></tr>`).join('');
+
+  $('limits').innerHTML = (out.explanation.limitations || [])
+    .map(x => `<li>${x}</li>`).join('');
+}
+
+$('league').onchange = fillTeams;
+$('go').onclick = predict;
+$('refresh').onclick = () => loadSchedule(true);
+loadTeams().then(() => loadSchedule(false));
+</script>
+</body>
+</html>

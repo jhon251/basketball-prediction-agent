@@ -318,15 +318,166 @@ def cba_schedule_rows(season_value: str, months: list[tuple[int, int]]) -> list[
                 seen_ids.add(sid)
                 home = g.get("homeTeamId") or g.get("homeTeamName")
                 away = g.get("visitingTeamId") or g.get("visitingTeamName")
+                # CBA status semantics (cba_api._status_for is the
+                # authority): 4 = FINAL, 1 = scheduled.  The upsert path
+                # uses the NBL convention ("1" = played), so translate.
+                played = str(g.get("status")) == "4"
+                # The day API has no tip-off time for upcoming games
+                # (always 00:00): bound the kickoff at end-of-day UTC —
+                # never earlier than the real slot, so same-day pre-game
+                # predictions stay possible.  Not a guess of the hour.
+                match_time = str(g.get("matchTime") or "00:00")
+                if not played and match_time == "00:00":
+                    match_time = "23:59"
                 rows.append({
                     "source_id": sid,
                     "date": day,
-                    "match_time": (g.get("matchTime") or "00:00"),
-                    "status_raw": str(g.get("status", "")),
+                    "match_time": match_time,
+                    "status_raw": "1" if played else "0",
                     "home": g.get("homeTeamName") or str(home),
                     "away": g.get("visitingTeamName") or str(away),
                     "home_id": str(home), "away_id": str(away),
-                    "home_score": g.get("homeTeamScore"),
-                    "away_score": g.get("visitingTeamScore"),
+                    "home_score": g.get("homeTeamScore") if played else "",
+                    "away_score": g.get("visitingTeamScore") if played else "",
                 })
     return rows
+
+
+# ------------------------------------------------------------------ ACB rows
+ACB_BASE = "https://api2.acb.com"
+ACB_API_KEY = "0dd94928-6f57-4c08-a3bd-b1b2f092976e"  # public site key
+LIGA_ENDESA_COMPETITION_ID = 1
+
+
+def _acb_get_json(path: str) -> dict:
+    """One ACB API call with the public-site key (verified 8-B6 header set)."""
+    return _get_json(ACB_BASE + path, headers={
+        "Accept": "application/json, text/plain, */*",
+        "X-APIKEY": ACB_API_KEY,
+        "Origin": "https://www.acb.com",
+        "Referer": "https://www.acb.com/",
+    })
+
+
+def acb_schedule_rows(
+    competition_id: int = LIGA_ENDESA_COMPETITION_ID,
+) -> tuple[list[dict], str | None, dict]:
+    """Season calendar flattened to upsert rows (Phase 12-H).
+
+    Two API calls: the season listing (latest edition picked by
+    ``seasonStartYear``) and that edition's calendar.  Row shape matches
+    the fixtures lifecycle: ``ACB{yyyy}-{source_id}`` ids are assigned by
+    the caller (``apply_fixtures_rows(id_scheme="source")``) so a later
+    season refresh reuses the SAME rows.
+    """
+    from datetime import datetime, timezone
+
+    root = _acb_get_json("/api/seasondata/Calendar/season-calendar")
+    seasons = (root.get("availableFilters") or {}).get("seasons") or []
+    if not seasons:
+        raise RuntimeError("ACB season-calendar payload has no seasons")
+    latest = max(seasons, key=lambda s: int(s.get("seasonStartYear") or 0))
+    start_year = int(latest["seasonStartYear"])
+    end_year = int(latest.get("seasonEndYear") or start_year + 1)
+    season_label = f"{start_year}-{str(end_year)[-2:]}"
+    query = (f"?competitionId={int(competition_id)}"
+             f"&editionId={int(latest['id'])}")
+    calendar = _acb_get_json(
+        "/api/seasondata/Calendar/season-calendar" + query)
+    rows: list[dict] = []
+    for round_obj in calendar.get("rounds") or []:
+        for m in round_obj.get("matches") or []:
+            mid = str(m.get("id") or "")
+            start_raw = str(m.get("startDateTime") or "")
+            if not mid or not start_raw:
+                continue
+            # matchStatus drives the lifecycle (scores are initialised
+            # to 0 for future games — never infer "played" from them);
+            # STARTED (live) and NOT_SCHEDULED (placeholder slot) drop.
+            status = str(m.get("matchStatus") or "")
+            if status == "FINALIZED":
+                status_raw, scored = "1", True
+            elif status == "NOT_STARTED":
+                status_raw, scored = "0", False
+            else:
+                continue
+            dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+            dt = dt.astimezone(timezone.utc)
+            hs, as_ = m.get("homeScore"), m.get("awayScore")
+            rows.append({
+                "source_id": mid,
+                "date": dt.strftime("%Y-%m-%d"),
+                "match_time": dt.strftime("%H:%M"),
+                "status_raw": status_raw,
+                "home_id": str(m.get("homeTeamId")),
+                "away_id": str(m.get("awayTeamId")),
+                "home_score": str(hs) if scored else "",
+                "away_score": str(as_) if scored else "",
+                "season": season_label,
+                "round": round_obj.get("roundNumber"),
+            })
+    extra = {"edition_id": latest.get("id"),
+             "competition_id": competition_id,
+             "n_matches": len(rows)}
+    return rows, season_label, extra
+
+
+def acb_edition_team_map(
+    competition_id: int = LIGA_ENDESA_COMPETITION_ID,
+    *,
+    cache_dir=None,
+    max_header_fetches: int = 40,
+) -> dict[str, dict]:
+    """Edition-scoped team id -> {club, name, abbr} for the latest ACB
+    edition (Phase 12-H).
+
+    ACB replaced its small stable ids with edition-scoped ones in
+    2026-27 (edition 91): the calendar's ``homeTeamId`` is now the
+    edition id, while the stable ``clubId`` survives inside MatchHeader
+    payloads (``teams.home.clubId``).  This fetches headers for already
+    FINALIZED matches and builds the bridge, cached to
+    ``acb_team_map_<edition>.json`` (24h TTL) so loop passes do not
+    re-scrape.  Clubs with no played match yet are absent — they resolve
+    on a later pass once they play (rows error loudly meanwhile).
+    """
+    import time
+    from pathlib import Path as _P
+
+    rows, season, extra = acb_schedule_rows(competition_id)
+    edition = int(extra.get("edition_id") or 0)
+    cache = _P(cache_dir) / f"acb_team_map_{edition}.json" if cache_dir \
+        else None
+    if cache is not None and cache.is_file():
+        age = time.time() - cache.stat().st_mtime
+        if age < 24 * 3600:
+            import json as _json
+            cached = _json.loads(cache.read_text(encoding="utf-8"))
+            if cached.get("edition") == edition:
+                return cached["map"]
+    mapping: dict[str, dict] = {}
+    finals = [r for r in rows if r["status_raw"] == "1"]
+    for r in finals[:max_header_fetches]:
+        try:
+            h = _acb_get_json(
+                "/api/matchdata/MatchHeader/match-header?matchId="
+                f"{r['source_id']}")
+        except Exception:  # noqa: BLE001 — best-effort bridge
+            continue
+        for side in ("home", "away"):
+            t = (h.get("teams") or {}).get(side) or {}
+            tid = t.get("id")
+            if tid is None:
+                continue
+            mapping[str(tid)] = {
+                "club": t.get("clubId"),
+                "name": t.get("fullName") or t.get("shortName"),
+                "abbr": t.get("abbreviatedName"),
+            }
+        time.sleep(0.3)
+    if cache is not None and mapping:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        import json as _json
+        cache.write_text(_json.dumps(
+            {"edition": edition, "map": mapping}, ensure_ascii=False,
+            indent=1), encoding="utf-8")
+    return mapping

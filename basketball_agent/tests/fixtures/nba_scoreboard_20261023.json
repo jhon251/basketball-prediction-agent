@@ -1,0 +1,532 @@
+{
+ "events": [
+  {
+   "id": "401909848",
+   "date": "2026-10-23T20:00Z",
+   "name": "Chicago Bulls at Milwaukee Bucks",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 4:00 PM EDT",
+     "shortDetail": "10/23 - 4:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "MIL"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "CHI"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909095",
+   "date": "2026-10-23T23:00Z",
+   "name": "New York Knicks at Boston Celtics",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 7:00 PM EDT",
+     "shortDetail": "10/23 - 7:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "NY"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909843",
+   "date": "2026-10-23T23:00Z",
+   "name": "Atlanta Hawks at Charlotte Hornets",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 7:00 PM EDT",
+     "shortDetail": "10/23 - 7:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "CHA"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "ATL"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909844",
+   "date": "2026-10-23T23:00Z",
+   "name": "Dallas Mavericks at Indiana Pacers",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 7:00 PM EDT",
+     "shortDetail": "10/23 - 7:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "IND"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "DAL"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909845",
+   "date": "2026-10-23T23:00Z",
+   "name": "Minnesota Timberwolves at Orlando Magic",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 7:00 PM EDT",
+     "shortDetail": "10/23 - 7:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "ORL"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "MIN"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909846",
+   "date": "2026-10-23T23:00Z",
+   "name": "Toronto Raptors at Washington Wizards",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 7:00 PM EDT",
+     "shortDetail": "10/23 - 7:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "WSH"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "TOR"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909847",
+   "date": "2026-10-24T00:00Z",
+   "name": "Detroit Pistons at Miami Heat",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 8:00 PM EDT",
+     "shortDetail": "10/23 - 8:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "DET"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909096",
+   "date": "2026-10-24T01:30Z",
+   "name": "Houston Rockets at San Antonio Spurs",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 9:30 PM EDT",
+     "shortDetail": "10/23 - 9:30 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "SA"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "HOU"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909849",
+   "date": "2026-10-24T01:30Z",
+   "name": "New Orleans Pelicans at Utah Jazz",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 9:30 PM EDT",
+     "shortDetail": "10/23 - 9:30 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "UTAH"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "NO"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909850",
+   "date": "2026-10-24T02:00Z",
+   "name": "Memphis Grizzlies at Golden State Warriors",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 10:00 PM EDT",
+     "shortDetail": "10/23 - 10:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "GS"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "MEM"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909851",
+   "date": "2026-10-24T02:00Z",
+   "name": "LA Clippers at Los Angeles Lakers",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 10:00 PM EDT",
+     "shortDetail": "10/23 - 10:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "LAC"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909852",
+   "date": "2026-10-24T02:00Z",
+   "name": "Portland Trail Blazers at Sacramento Kings",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0.0",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Fri, October 23rd at 10:00 PM EDT",
+     "shortDetail": "10/23 - 10:00 PM EDT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "abbreviation": "SAC"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "abbreviation": "POR"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

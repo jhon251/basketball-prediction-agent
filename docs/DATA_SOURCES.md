@@ -44,6 +44,29 @@
 ### 降级方案
 llimllib 仓库停更 → ESPN 子目录仍有箱型数据 → stats.nba.com/nba_api → balldontlie 免费层兜底赛果。
 
+### 未来赛程源：ESPN 公共 scoreboard ✅ 实测（Phase 12-B 已接入）
+- `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=YYYYMMDD`
+  **无需鉴权**，2026-10-23 本机实测（12 events）；适配器
+  `data/collectors/nba_scoreboard.py`，真实响应裁剪夹具入库
+  `tests/fixtures/nba_scoreboard_20261023.json`。
+- 用途：未来 8 天赛程 → SCHEDULED 行 → 赛前预测；赛后同源返回决赛比分
+  （预测结算）。注意 `season.year` 是结束年（2026-27→2027）；季前赛
+  type=1 丢弃。深历史仍走 llimllib parquet。
+
+### 伤停源：ESPN 公共 injuries ✅ 实测（Phase 12-G 已接入）
+- `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries`
+  **无需鉴权**，2026-10-25 实测 75 条记录（按 30 队分组）；适配器
+  `data/collectors/espn_injuries.py`，真实裁剪夹具
+  `tests/fixtures/espn_injuries_20261025.json`。
+- 用途：伤停 → `player_availability`（挂到未来 8 天该队每场比赛）→
+  `available_minutes_share` + `injury_uncertainty` 旗标。注意：athlete
+  无 id 字段（从 player-card 链接解析）；状态词表 Out/Inactive/
+  Suspended/Doubtful/Questionable/Day-To-Day 显式映射（OUT=0.0 硬规则），
+  未知状态 fail-loud；无 game 上下文，比赛日需重跑拿最新。
+- 分钟权重配套：llimllib `playerlog_<end-year>.parquet`（球员每场日志）
+  + `players_<year>.parquet`（名册）→ `ingest-players` CLI；2026-27 赛季
+  文件尚未发布，当前用 2025-26。
+
 ---
 
 ## 2. EuroLeague
