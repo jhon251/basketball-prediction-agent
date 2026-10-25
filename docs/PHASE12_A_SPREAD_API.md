@@ -261,3 +261,26 @@ ACB/CBA fixtures 已接入 production loop（`_acb_fixtures_pass` +
 通用 `_upsert_scheduled_pass`），每轮自动发现未来赛程 + 决赛落分。
 实测后 DB SCHEDULED 分布：NBA 72 / NBL 145 / BSL 175 / ACB 260 /
 CBA 47——**六联赛里五个有可预测的未来赛程**（EuroLeague 除外）。
+
+## 12-I 比分（分差区间）矩阵（2026-10-25 追加）
+
+此前只有分差均值/分位数与让分赢盘概率，无"主胜/客胜 × 分差区间"分桶。
+`agents/spread_probability.py` 新增 `MARGIN_RANGE_BUCKETS`（11 桶完备分割：
+客胜 21+/16-20/11-15/6-10/1-5、平局、主胜 1-5…21+，整数分差每场恰好落
+一桶，概率和恒为 1——含平局桶，因冻结模拟器以整节时长截断时允许平局）
+与两个供给方：
+
+* `margin_ranges_from_samples`：Monte Carlo 逐场分差直接计数；
+* `margin_ranges_from_normal`：连续性修正正态（P(a≤m≤b)=Φ((b+.5−μ)/σ)
+  −Φ((a−.5−μ)/σ)），μ=Elo 胜率逆概率单位映射（与让分 elo_normal 同族）。
+
+API `predict` 响应新增 `margin_ranges` 块（常驻，无需让分输入）：
+`{default_source, sigma, buckets:[{code, side, range,
+simulation_samples, elo_normal}]}`，默认口径沿用 SPREAD_SOURCE_BY_LEAGUE。
+前端"比分矩阵"卡：客胜 5 档｜平局｜主胜 5 档横排，色阶按概率（主蓝客橙，
+高亮≥60% 最大桶），Elo 正态 / Monte Carlo 一键切换（选择跨次预测保留）。
+
+实测（LAL @ UTA）：Elo 口径客胜 21+ 30.5%（隐含湖人 82.5% 大热）vs 模拟
+口径主胜 57.7%——两家分歧如实并排展示，与 risk 旗标 model_disagreement
+互证。校验：API 测试断言主胜桶之和 == simulation 家族胜率（逐位相等），
+两口径各自总和 == 1。区间标签用幅值（"16-20"），正负由侧别/颜色表达。

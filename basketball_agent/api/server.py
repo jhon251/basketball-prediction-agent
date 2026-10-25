@@ -310,22 +310,51 @@ class BasketballApiApp:
         explanation = ExplanationAgent().explain(record)
 
         league = game.league.value
+        # shared inputs for the spread + margin-range layers
+        sigma = self._margin_sigma(league, as_of)
+        margins = [run.margin for run in prediction.monte_carlo.runs]
+        p_elo = prediction.features.elo_win_prob_home
+        default_source = SPREAD_SOURCE_BY_LEAGUE.get(
+            league, _DEFAULT_SPREAD_SOURCE)
+
+        # Phase 12-I: 分差区间 buckets (主胜/客胜 1-5…20+), both providers
+        from basketball_agent.agents.spread_probability import (
+            elo_expected_margin, margin_ranges_from_normal,
+            margin_ranges_from_samples,
+        )
+
+        sim_ranges = (margin_ranges_from_samples(margins)
+                      if margins else None)
+        elo_ranges = (margin_ranges_from_normal(
+            elo_expected_margin(p_elo, sigma), sigma)
+            if p_elo is not None else None)
+        base_ranges = sim_ranges or elo_ranges or []
+        margin_ranges = {
+            "default_source": (default_source if elo_ranges
+                               else "simulation_samples"),
+            "sigma": sigma,
+            "buckets": [
+                {"code": b["code"], "side": b["side"], "range": b["range"],
+                 "simulation_samples": (s["probability"] if sim_ranges
+                                        else None),
+                 "elo_normal": (e["probability"] if elo_ranges else None)}
+                for b, s, e in zip(
+                    base_ranges, sim_ranges or base_ranges,
+                    elo_ranges or base_ranges)
+            ],
+        }
+
         spread = None
         if req.home_line is not None:
             line = float(req.home_line)
-            source = (req.spread_source
-                      or SPREAD_SOURCE_BY_LEAGUE.get(league,
-                                                     _DEFAULT_SPREAD_SOURCE))
+            source = (req.spread_source or default_source)
             if source not in ("elo_normal", "simulation_samples"):
                 raise ApiError(
                     f"spread_source must be elo_normal|simulation_samples, "
                     f"got {source!r}")
-            sigma = self._margin_sigma(league, as_of)
-            margins = [run.margin for run in prediction.monte_carlo.runs]
             sim_cover = (cover_from_samples(margins, line)
                          if margins else None)
-            elo_cover = cover_from_elo_normal(
-                prediction.features.elo_win_prob_home, sigma, line)
+            elo_cover = cover_from_elo_normal(p_elo, sigma, line)
             spread = {
                 "home_line": line,
                 "default_source": source,
@@ -386,6 +415,7 @@ class BasketballApiApp:
                 "p95": margin_dist.p95,
             },
             "spread": spread,
+            "margin_ranges": margin_ranges,
             "risk": {
                 "confidence": prediction.risk.confidence_score,
                 "flags": [{"code": f.code, "severity": f.severity.value

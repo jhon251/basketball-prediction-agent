@@ -166,3 +166,68 @@ def fit_margin_sigma(
     if not math.isfinite(s) or s < 1.0:
         return default
     return s
+
+
+# ---------------------------------------------------------- margin ranges
+# Phase 12-I: 分差区间 buckets (主胜/客胜 1-5 / 6-10 / 11-15 / 16-20 /
+# 20+).  Integer margins are a complete partition — every possible
+# margin lands in exactly one bucket, so the probabilities sum to 1
+# (ties exist in the frozen simulator's regulation-length samples).
+MARGIN_RANGE_BUCKETS: tuple[tuple[str, str, int | None, int | None], ...] = (
+    ("away_20_plus", "away", None, -21),
+    ("away_16_20", "away", -20, -16),
+    ("away_11_15", "away", -15, -11),
+    ("away_6_10", "away", -10, -6),
+    ("away_1_5", "away", -5, -1),
+    ("tie", "tie", 0, 0),
+    ("home_1_5", "home", 1, 5),
+    ("home_6_10", "home", 6, 10),
+    ("home_11_15", "home", 11, 15),
+    ("home_16_20", "home", 16, 20),
+    ("home_20_plus", "home", 21, None),
+)
+
+
+def margin_ranges_from_samples(
+    margins: Sequence[int],
+) -> list[dict]:
+    """Empirical 分差区间 probabilities from integer margin samples."""
+    if len(margins) == 0:
+        raise ValueError("margins must not be empty")
+    n = len(margins)
+    counts = {code: 0 for code, _, _, _ in MARGIN_RANGE_BUCKETS}
+    for m in margins:
+        for code, _side, lo, hi in MARGIN_RANGE_BUCKETS:
+            if (lo is None or m >= lo) and (hi is None or m <= hi):
+                counts[code] += 1
+                break
+    return [{"code": code, "side": side, "range": _range_label(lo, hi),
+             "probability": counts[code] / n}
+            for code, side, lo, hi in MARGIN_RANGE_BUCKETS]
+
+
+def margin_ranges_from_normal(mean: float, sigma: float) -> list[dict]:
+    """Continuity-corrected normal 分差区间 probabilities."""
+    s = float(sigma)
+    if not math.isfinite(s) or s <= 0.0:
+        raise ValueError(f"sigma must be positive and finite, got {sigma}")
+    out: list[dict] = []
+    for code, side, lo, hi in MARGIN_RANGE_BUCKETS:
+        upper = _NORMAL.cdf((hi + 0.5 - mean) / s) if hi is not None else 1.0
+        lower = _NORMAL.cdf((lo - 0.5 - mean) / s) if lo is not None else 0.0
+        p = min(max(upper - lower, 0.0), 1.0)
+        out.append({"code": code, "side": side,
+                    "range": _range_label(lo, hi), "probability": p})
+    return out
+
+
+def _range_label(lo: int | None, hi: int | None) -> str:
+    """Magnitude labels — the cell's side (home/away) disambiguates sign."""
+    if lo is None:
+        return f"{abs(hi)}+" if hi is not None else "ALL"
+    if hi is None:
+        return f"{lo}+"
+    if lo == 0 and hi == 0:
+        return "平"
+    a, b = abs(lo), abs(hi)
+    return f"{min(a, b)}-{max(a, b)}"

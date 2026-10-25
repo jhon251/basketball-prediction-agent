@@ -135,3 +135,72 @@ class TestContract:
             CoverProbabilities(
                 home_cover=0.6, push=0.6, away_cover=0.6,
                 home_line=-5.5, method="x")
+
+
+class TestMarginRanges:
+    def test_samples_partition_and_order(self):
+        from basketball_agent.agents.spread_probability import (
+            MARGIN_RANGE_BUCKETS, margin_ranges_from_samples,
+        )
+        rows = margin_ranges_from_samples(
+            [-25, -18, -12, -7, -3, 0, 2, 8, 13, 17, 24])
+        assert [r["code"] for r in rows] == [
+            b[0] for b in MARGIN_RANGE_BUCKETS]
+        # one sample per bucket -> every bucket exactly 1/11
+        for r in rows:
+            assert r["probability"] == pytest.approx(1 / 11)
+
+    def test_sample_edge_values(self):
+        # 20 belongs to 16-20; 21 to 20+; 1 and 5 to 1-5
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_samples,
+        )
+        rows = margin_ranges_from_samples([20, 21, 1, 5])
+        by = {r["code"]: r["probability"] for r in rows}
+        assert by["home_16_20"] == pytest.approx(0.25)
+        assert by["home_20_plus"] == pytest.approx(0.25)
+        assert by["home_1_5"] == pytest.approx(0.5)
+
+    def test_samples_sum_to_one_with_ties(self):
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_samples,
+        )
+        rows = margin_ranges_from_samples([0, 0, 3, -30, 11])
+        assert sum(r["probability"] for r in rows) == pytest.approx(1.0)
+        by = {r["code"]: r["probability"] for r in rows}
+        assert by["tie"] == pytest.approx(0.4)
+
+    def test_empty_fails(self):
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_samples,
+        )
+        with pytest.raises(ValueError):
+            margin_ranges_from_samples([])
+
+    def test_normal_symmetric_mean(self):
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_normal,
+        )
+        rows = margin_ranges_from_normal(0.0, 12.0)
+        by = {r["code"]: r["probability"] for r in rows}
+        assert by["home_1_5"] == pytest.approx(by["away_1_5"], abs=1e-9)
+        assert by["home_20_plus"] == pytest.approx(by["away_20_plus"],
+                                                   abs=1e-9)
+        assert sum(r["probability"] for r in rows) == pytest.approx(
+            1.0, abs=1e-9)
+
+    def test_normal_favorite_skews_home(self):
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_normal,
+        )
+        rows = margin_ranges_from_normal(6.0, 12.0)
+        by = {r["code"]: r["probability"] for r in rows}
+        assert by["home_6_10"] > by["away_6_10"]
+        assert by["home_20_plus"] > by["away_20_plus"]
+
+    def test_normal_bad_sigma_fails(self):
+        from basketball_agent.agents.spread_probability import (
+            margin_ranges_from_normal,
+        )
+        with pytest.raises(ValueError):
+            margin_ranges_from_normal(0.0, 0.0)

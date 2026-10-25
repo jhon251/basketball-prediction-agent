@@ -163,3 +163,29 @@ class TestHttpRoundTrip:
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class TestMarginRanges:
+    def test_block_shape_and_sums(self, app, _future_target):
+        out = app.predict(PredictRequest(game_id=_future_target.game_id))
+        block = out["margin_ranges"]
+        assert len(block["buckets"]) == 11
+        assert [b["code"] for b in block["buckets"]][0] == "away_20_plus"
+        assert [b["code"] for b in block["buckets"]][-1] == "home_20_plus"
+        tie = next(b for b in block["buckets"] if b["code"] == "tie")
+        assert tie["side"] == "tie"
+        for src in ("simulation_samples", "elo_normal"):
+            probs = [b[src] for b in block["buckets"] if b[src] is not None]
+            assert probs, f"{src} missing entirely"
+            assert abs(sum(probs) - 1.0) < 1e-6
+        assert block["default_source"] in ("elo_normal",
+                                           "simulation_samples")
+
+    def test_home_win_consistent_with_primary(self, app, _future_target):
+        # sum of home buckets ≈ primary home win probability (samples)
+        out = app.predict(PredictRequest(game_id=_future_target.game_id))
+        block = out["margin_ranges"]
+        home_p = sum(b["simulation_samples"] for b in block["buckets"]
+                     if b["side"] == "home" and b["simulation_samples"])
+        sim_p = out["families"]["simulation"]
+        assert home_p == pytest.approx(sim_p, abs=1e-9)

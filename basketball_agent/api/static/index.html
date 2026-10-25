@@ -78,6 +78,23 @@
           border-radius: 50%; animation: r 0.8s linear infinite;
           vertical-align: -2px; margin-right: 6px; }
   @keyframes r { to { transform: rotate(360deg); } }
+  .matrix { display: flex; gap: 6px; margin-top: 12px; align-items: stretch; }
+  .mcell { flex: 1; border-radius: 6px; padding: 8px 4px; text-align: center;
+           border: 1px solid var(--line); min-width: 0; }
+  .mcell .p { font-size: 15px; font-weight: 600; }
+  .mcell .r { font-size: 11px; color: var(--muted); }
+  .mcell.side-away { background: rgba(247,129,102,.12); }
+  .mcell.side-away.hot { background: rgba(247,129,102,.75); }
+  .mcell.side-home { background: rgba(88,166,255,.12); }
+  .mcell.side-home.hot { background: rgba(88,166,255,.75); }
+  .mcell.side-home.hot .p, .mcell.side-home.hot .r { color: #0d1117; }
+  .mcell.side-away.hot .p, .mcell.side-away.hot .r { color: #0d1117; }
+  .mcell.side-tie { background: var(--bg); }
+  .msrc { float: right; font-size: 12px; color: var(--muted); }
+  .msrc button { background: transparent; border: 1px solid var(--line);
+                 color: var(--muted); border-radius: 4px; padding: 2px 8px;
+                 font-size: 11px; cursor: pointer; margin-left: 4px; }
+  .msrc button.on { color: var(--text); border-color: var(--home); }
 </style>
 </head>
 <body>
@@ -119,6 +136,11 @@
     <div class="card"><h3>模型家族对比（主胜概率）</h3><table class="fam" id="fam"></table></div>
   </div>
   <details><summary>口径与限制</summary><ul id="limits"></ul></details>
+  <div id="matrix-wrap">
+    <h3 style="font-size:14px;margin-top:14px">比分矩阵（分差范围概率）
+      <span class="msrc" id="msrc"></span></h3>
+    <div class="matrix" id="matrix"></div>
+  </div>
 </div>
 
 <div class="panel">
@@ -215,6 +237,7 @@ async function predict() {
 }
 
 function render(out) {
+  _lastOut = out;
   $('result').style.display = '';
   const nm = t => t.name_cn ? `${t.name_cn} (${t.name})` : t.name;
   $('m-home').textContent = nm(out.game.home);
@@ -301,7 +324,46 @@ function render(out) {
 
   $('limits').innerHTML = (out.explanation.limitations || [])
     .map(x => `<li>${x}</li>`).join('');
+
+  renderMatrix(out);
 }
+
+let _mrSrc = null;  // persisted 口径选择 across renders
+
+function renderMatrix(out) {
+  const block = out.margin_ranges;
+  if (!block || !block.buckets) { $('matrix-wrap').style.display = 'none'; return; }
+  $('matrix-wrap').style.display = '';
+  const srcs = ['elo_normal', 'simulation_samples'].filter(
+    s => block.buckets.some(b => b[s] != null));
+  if (!srcs.includes(_mrSrc)) _mrSrc = block.default_source;
+  const pick = b => {
+    let v = b[_mrSrc];
+    if (v == null) v = b[srcs.find(s => b[s] != null)];
+    return v == null ? 0 : v;
+  };
+  const max = Math.max(...block.buckets.map(pick));
+  const label = {home: '主胜+', away: '客胜+', tie: ''};
+  const cell = b => {
+    const v = pick(b);
+    const cls = 'side-' + b.side + (v >= 0.6 * max && v > 0 ? ' hot' : '');
+    const rng = b.side === 'tie' ? '平' :
+      (b.side === 'home' ? '主胜 ' : '客胜 ') + b.range;
+    return `<div class="mcell ${cls}" title="${rng}: ${(v*100).toFixed(1)}%">` +
+      `<div class="p">${(v*100).toFixed(1)}%</div>` +
+      `<div class="r">${b.side === 'tie' ? '平局' : b.range}</div></div>`;
+  };
+  const away = block.buckets.filter(b => b.side === 'away').reverse();
+  const tie = block.buckets.filter(b => b.side === 'tie');
+  const home = block.buckets.filter(b => b.side === 'home');
+  $('matrix').innerHTML =
+    away.map(cell).join('') + tie.map(cell).join('') + home.map(cell).join('');
+  $('msrc').innerHTML = '口径: ' + srcs.map(s =>
+    `<button class="${s === _mrSrc ? 'on' : ''}" onclick="_mrSrc='${s}';renderMatrix(_lastOut)">${s === 'elo_normal' ? 'Elo 正态' : 'Monte Carlo'}</button>`
+  ).join('');
+}
+
+let _lastOut = null;
 
 $('league').onchange = fillTeams;
 $('go').onclick = predict;
