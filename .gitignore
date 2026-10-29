@@ -12,3 +12,7 @@ storage/
 dist/
 build/
 *.egg-info/
+
+# local tool artifacts (not part of the project)
+.v2c/
+.video_agent/

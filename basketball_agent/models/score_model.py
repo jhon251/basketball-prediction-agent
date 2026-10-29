@@ -129,10 +129,20 @@ def rescale_to_ppp(
 ) -> PossessionParams:
     """Rescale 2PT/3PT percentages so the implied PPP equals ``target``.
 
-    The implied PPP is ``(a*s + b) / (1 - orb*(1 - c*s))`` in the scale ``s``,
-    which is linear — so ``s`` has an exact closed-form solution.  Used both
-    by the score model itself and by the simulation layer's player
-    adjustments (core-player efficiency, injuries).
+    The implied PPP is ``(a*s + b) / (1 - p_fga*orb*(1 - c*s))`` in the
+    scale ``s``, which is linear — so ``s`` has an exact closed-form
+    solution.  Used both by the score model itself and by the simulation
+    layer's player adjustments (core-player efficiency, injuries).
+
+    The continuation probability carries the ``p_fga`` factor: an
+    offensive rebound can only follow a FIELD-GOAL miss, and a field
+    goal goes up only with probability ``p_fga`` per opportunity
+    (turnovers and free-throw trips end the possession).  Phase 12-L
+    fixed both terms — the previous formula omitted ``p_fga``,
+    overstated continuation, and made the sampler realize ~3.8% fewer
+    points per possession than the recorded target (measured 2026-10-25
+    on a live NBA game: sampler 1.0813 vs recorded 1.1240; corrected
+    closed form predicts 1.0841 = empirical within noise).
     """
     cfg = config or ScoreModelConfig()
     p3a = params.p3a_share
@@ -140,8 +150,8 @@ def rescale_to_ppp(
     a = params.p_fga * mix_points
     b = params.p_fta * params.fta_per_event * params.ft_pct
     c = p3a * params.p3_pct + (1.0 - p3a) * params.p2_pct
-    numerator = target * (1.0 - params.orb_pct) - b
-    denominator = a - target * params.orb_pct * c
+    numerator = target * (1.0 - params.p_fga * params.orb_pct) - b
+    denominator = a - target * params.p_fga * params.orb_pct * c
     scale = (numerator / denominator) if abs(denominator) > 1e-12 else 1.0
     p2 = clamp(params.p2_pct * scale, cfg.min_pct, cfg.max_pct)
     p3 = clamp(params.p3_pct * scale, cfg.min_pct, cfg.max_pct)
@@ -150,7 +160,7 @@ def rescale_to_ppp(
     miss = 1.0 - made
     per_opp = params.p_fga * (p3a * p3 * 3.0 + (1.0 - p3a) * p2 * 2.0) \
         + params.p_fta * params.fta_per_event * params.ft_pct
-    denom = 1.0 - miss * params.orb_pct
+    denom = 1.0 - params.p_fga * miss * params.orb_pct
     opportunities = 1.0 / denom if abs(denom) > 1e-12 else 1.0
     implied = per_opp * opportunities
     return PossessionParams(

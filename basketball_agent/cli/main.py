@@ -405,6 +405,50 @@ def _build_parser() -> argparse.ArgumentParser:
     ni.add_argument("--days", type=int, default=8,
                     help="upcoming-game window (default 8)")
 
+    ef = sub.add_parser(
+        "euroleague-fixtures",
+        help="bootstrap the EuroLeague season calendar by enumerating the "
+             "live Header endpoint (Phase 12-J; played games are "
+             "finalized with their Boxscore)")
+    ef.add_argument("--season", default="E2026",
+                    help="season code (default E2026)")
+    ef.add_argument("--max-code", type=int, default=340,
+                    help="highest gameCode to probe (default 340)")
+    ef.add_argument("--trailing-empty-stop", type=int, default=3,
+                    help="consecutive empty codes before stopping "
+                         "(default 3)")
+
+    bi = sub.add_parser(
+        "basketnews-injuries",
+        help="parse a rendered BasketNews injury-report snapshot and "
+             "attach availability rows to upcoming EuroLeague games "
+             "(Phase 12-J; the site 403s plain clients, so ingest a "
+             "saved snapshot)")
+    bi.add_argument("--file", default=None,
+                    help="rendered snapshot path (markdown-ish text or "
+                         "saved HTML); latest archived snapshot when "
+                         "omitted")
+    bi.add_argument("--days", type=int, default=8,
+                    help="upcoming-game window (default 8)")
+    bi.add_argument("--no-attach", action="store_true",
+                    help="parse and archive only")
+
+    da = sub.add_parser(
+        "dnp-audit",
+        help="reconcile BasketNews OUT records with actual Boxscore "
+             "participation (Phase 12-J; OUT precision + false-alarm "
+             "list)")
+    da.add_argument("--days", type=int, default=21,
+                    help="lookback window (default 21; snapshot mode: 7)")
+    da.add_argument("--no-fetch", action="store_true",
+                    help="use cached boxscores only")
+    da.add_argument("--snapshot", default=None,
+                    help="historical mode: reconcile an archived report "
+                         "snapshot directly (no availability rows)")
+    da.add_argument("--as-of", default=None,
+                    help="snapshot-mode reference date YYYY-MM-DD "
+                         "(default: today)")
+
     return parser
 
 
@@ -537,6 +581,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_ingest_players(args)
     if args.command == "nba-injuries":
         return _cmd_nba_injuries(args)
+    if args.command == "euroleague-fixtures":
+        return _cmd_euroleague_fixtures(args)
+    if args.command == "basketnews-injuries":
+        return _cmd_basketnews_injuries(args)
+    if args.command == "dnp-audit":
+        return _cmd_dnp_audit(args)
 
     return 2
 
@@ -571,6 +621,122 @@ def _cmd_nba_injuries(args) -> int:
     for err in result.errors[:10]:
         print(f"  ERROR {err}")
     return 1 if result.errors else 0
+
+
+def _cmd_euroleague_fixtures(args) -> int:
+    from pathlib import Path as _Path
+
+    from basketball_agent.collection.euroleague_fixtures import (
+        bootstrap_euroleague_season,
+    )
+
+    db, settings = _open_db()
+    state_dir = _Path(settings.db_path).parent / "collector"
+    delta = bootstrap_euroleague_season(
+        db, state_dir, args.season, max_code=args.max_code,
+        trailing_empty_stop=args.trailing_empty_stop)
+    print(f"headers reused:      {delta.headers_reused}")
+    print(f"headers fetched:     {delta.headers_fetched}")
+    print(f"boxscores fetched:   {delta.boxscores_fetched}")
+    print(f"scheduled upserted:  {delta.upserted_scheduled}")
+    print(f"postponed upserted:  {delta.upserted_postponed}")
+    print(f"finals inserted:     {delta.inserted_final}")
+    print(f"finalized:           {delta.finalized}")
+    print(f"team stats inserted: {delta.team_stats_inserted}")
+    if delta.stopped_at_code is not None:
+        print(f"stopped at code:     {delta.stopped_at_code} "
+              f"({args.trailing_empty_stop} consecutive empty)")
+    for err in delta.errors[:10]:
+        print(f"  ERROR {err['source_id']}: {err['error']}")
+    return 0 if delta.ok else 1
+
+
+def _cmd_basketnews_injuries(args) -> int:
+    from datetime import datetime, timezone as _tz
+
+    from basketball_agent.collection.basketnews import (
+        attach_report, latest_snapshot, save_snapshot,
+    )
+    from basketball_agent.data.collectors.basketnews_injuries import (
+        load_snapshot_file, parse_report,
+    )
+
+    if args.file:
+        snapshot = Path(args.file)
+        text = load_snapshot_file(snapshot)
+    else:
+        snapshot = latest_snapshot()
+        text = load_snapshot_file(snapshot)
+    report = parse_report(text, fetched_at=datetime.now(_tz.utc))
+    out_path = save_snapshot(text, n_records=len(report.records))
+    print(f"snapshot archived:   {out_path}")
+    print(f"team sections:       {report.n_team_sections}")
+    print(f"records parsed:      {len(report.records)}")
+    by_status: dict[str, int] = {}
+    for r in report.records:
+        by_status[r.status] = by_status.get(r.status, 0) + 1
+    print(f"by status:           "
+          f"{dict(sorted(by_status.items(), key=lambda kv: -kv[1]))}")
+    if args.no_attach:
+        return 0
+    db, _ = _open_db()
+    delta = attach_report(db, report, window_days=args.days)
+    print(f"players registered:  {delta.players_registered}")
+    print(f"availability written:{delta.availability_written}")
+    print(f"skipped available:   {delta.skipped_available}")
+    print(f"skipped existing:    {delta.skipped_existing}")
+    print(f"skipped round miss:  {delta.skipped_round_mismatch}")
+    print(f"records w/o game:    {delta.records_without_game}")
+    for err in delta.errors[:10]:
+        print(f"  ERROR {err}")
+    return 0 if delta.ok else 1
+
+
+def _cmd_dnp_audit(args) -> int:
+    from basketball_agent.evaluation.dnp_audit import (
+        audit_basketnews_out, audit_snapshot_out,
+    )
+
+    db, _ = _open_db()
+    if args.snapshot:
+        from datetime import datetime, timezone as _tz
+
+        from basketball_agent.collection.basketnews import (
+            SEASON_BUNDLE_DIR,
+        )
+
+        as_of = (datetime.strptime(args.as_of, "%Y-%m-%d").replace(
+            tzinfo=_tz.utc) if args.as_of else datetime.now(_tz.utc))
+        result = audit_snapshot_out(
+            db, args.snapshot, as_of=as_of, lookback_days=args.days,
+            season_bundle_path=SEASON_BUNDLE_DIR
+            / "euroleague_E2026_raw.json",
+            fetch_missing=not args.no_fetch)
+    else:
+        result = audit_basketnews_out(db, lookback_days=args.days,
+                                      fetch_missing=not args.no_fetch)
+    s = result.summary()
+    print(f"OUT records total:   {s['out_records_total']}")
+    print(f"confirmed (rostered):{s['confirmed_out']}")
+    print(f"confirmed (absent):  {s['confirmed_absent']}")
+    print(f"false alarms:        {s['false_alarms']}")
+    print(f"pending (not final): {s['pending']}")
+    print(f"unresolved names:    {s['unresolved_names']}")
+    print(f"no boxscore:         {s['no_boxscore']}")
+    print(f"non-OUT records:     {s['non_out_records']}")
+    precision = s["out_precision"]
+    if precision is None:
+        print("OUT precision:       n/a (no decided records yet)")
+    else:
+        confirmed = s["confirmed_out"] + s["confirmed_absent"]
+        print(f"OUT precision:       {precision:.1%} "
+              f"({confirmed}/{s['decided']} decided)")
+    for fa in result.false_alarms[:10]:
+        print(f"  FALSE-ALARM {fa['game_id']} {fa['player']} "
+              f"played {fa['minutes']}min")
+    for un in result.unresolved_names[:10]:
+        print(f"  UNRESOLVED {un['game_id']} {un['player']}")
+    return 0
 
 
 def _cmd_confidence_calibrate(args) -> int:

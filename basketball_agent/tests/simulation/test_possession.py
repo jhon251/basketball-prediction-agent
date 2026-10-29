@@ -127,12 +127,47 @@ class TestRescaleToPpp:
         assert high.p3_pct > low.p3_pct
 
     def test_hand_computed_scale(self):
-        # made = 0.44, miss = 0.56, opps = 1/(1-0.56*0.25) = 1/0.86
-        # per_opp = 0.78*1.02 + 0.15 = 0.9456 -> implied = 1.0995349
+        # made = 0.44, miss = 0.56; continuation carries p_fga (12-L):
+        # opps = 1/(1 - 0.78*0.56*0.25) = 1/0.8908   (pre-12-L: 1/0.86)
+        # per_opp = 0.78*1.02 + 0.15 = 0.9456 -> implied = 1.0615177...
+        break_even = 0.9456 / (1 - 0.78 * 0.56 * 0.25)
         params = make_params()
-        assert rescale_to_ppp(params, 1.0995348837209301).expected_ppp == pytest.approx(
-            1.0995348837209301, abs=1e-9
+        assert rescale_to_ppp(params, break_even).expected_ppp == pytest.approx(
+            1.0615177368657387, abs=1e-9
         )
-        # scale for target 1.09953... must be ~1.0 -> pcts unchanged
-        rescaled = rescale_to_ppp(params, 1.0995348837209301)
+        # scale for the break-even target must be 1.0 -> pcts unchanged
+        rescaled = rescale_to_ppp(params, break_even)
         assert rescaled.p2_pct == pytest.approx(0.50, abs=1e-9)
+
+
+class TestRescaleSamplerContract:
+    """Phase 12-L: the rescale's closed form must equal the SAMPLER's
+    true expectation.  The pre-12-L formula omitted ``p_fga`` from the
+    continuation probability and realized ~3.8% fewer points per
+    possession than it recorded (the totals under-lean bug)."""
+
+    def test_exact_recursion_matches_recorded_implied(self):
+        # E = per_opp / (1 - p_fga * orb * (1 - made)) — the exact
+        # expectation of the resolve_opportunity continuation process
+        params = rescale_to_ppp(make_params(), 1.20)
+        made = (params.p3a_share * params.p3_pct
+                + (1 - params.p3a_share) * params.p2_pct)
+        per_opp = (
+            params.p_fga * (params.p3a_share * params.p3_pct * 3.0
+                            + (1 - params.p3a_share) * params.p2_pct * 2.0)
+            + params.p_fta * params.fta_per_event * params.ft_pct)
+        expected = per_opp / (1 - params.p_fga * params.orb_pct * (1 - made))
+        assert params.expected_ppp == pytest.approx(expected, abs=1e-12)
+
+    def test_empirical_sampler_matches_recorded_implied(self):
+        params = rescale_to_ppp(make_params(), 1.20)
+        rng = random.Random(7)
+        n = 100_000
+        points = 0
+        for _ in range(n):
+            while True:
+                r = resolve_opportunity(rng, params)
+                points += r.points
+                if r.possession_over:
+                    break
+        assert points / n == pytest.approx(params.expected_ppp, abs=0.015)

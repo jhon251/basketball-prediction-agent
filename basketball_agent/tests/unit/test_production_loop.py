@@ -18,7 +18,11 @@ from basketball_agent.data.db.connection import Database
 @pytest.fixture(autouse=True)
 def _no_network_injuries(monkeypatch):
     """Phase 12-G: the NBA pass refreshes ESPN injuries; stub it so this
-    suite keeps its no-network guarantee."""
+    suite keeps its no-network guarantee.  Phase 12-H: the ACB pass
+    consults the edition->clubId bridge (a live acb.com call when the
+    per-state cache is cold — it stalled a whole suite run once, finding
+    12-J); stub it the same way."""
+    from basketball_agent.collection import sources
     from basketball_agent.data.collectors import espn_injuries
 
     class _Stub:
@@ -29,6 +33,8 @@ def _no_network_injuries(monkeypatch):
 
     monkeypatch.setattr(espn_injuries, "refresh_injuries",
                         lambda db, **kw: _Stub())
+    monkeypatch.setattr(sources, "acb_edition_team_map",
+                        lambda **kw: {})
 from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import (
     Competition, GameStatus, League,

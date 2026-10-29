@@ -284,3 +284,152 @@ simulation_samples, elo_normal}]}`，默认口径沿用 SPREAD_SOURCE_BY_LEAGUE�
 口径主胜 57.7%——两家分歧如实并排展示，与 risk 旗标 model_disagreement
 互证。校验：API 测试断言主胜桶之和 == simulation 家族胜率（逐位相等），
 两口径各自总和 == 1。区间标签用幅值（"16-20"），正负由侧别/颜色表达。
+
+## 12-J BasketNews 欧篮伤停抽取器 + DNP 对账（2026-10-25 追加）
+
+EuroLeague 有了官方伤停源：BasketNews《EuroLeague Injury Report (updated
+daily)》（`news-212393-euroleague-injury-report-updated.html`，20 队全覆盖、
+每日更新、官网自带 7 档状态色标）。此前 12-G 的伤停层只有 NBA（ESPN），
+EUROLEAGUE 的 availability 恒为空。
+
+### 采集现实（如实记录）
+
+* basketnews.com 对一切裸 HTTP 客户端返回 403（首页/文章/RSS，带完整浏览器
+  头同样 403——Cloudflare 级防护，非头策略问题）。因此**采集通道是"渲染
+  快照"**：浏览器另存或任意渲染服务产出文本/HTML 文件，
+  `basketnews-injuries --file` 吃快照（HTML 走 stdlib html.parser 保表格
+  结构转管道行，与 markdown 同一解析路径）；`fetch_article()` 保留直连
+  尝试（失败时错误信息明确指引导快照路径）。快照落
+  `storage/raw/basketnews/`（sha256 manifest）——快照即每条 availability
+  行的出处。
+* EuroLeague E2026 赛季库内为零（深度刷新停在 2025-26），且 EL 无日历
+  端点——`euroleague-fixtures` 自举：枚举 live Header 的 gameCode（连续
+  3 个空码即停），有比分的场次连 Boxscore 一起过 **season-refresh 同款
+  解析器**（比分交叉校验/时区换算/别名解析）落 FINAL+球队统计；无比分的
+  按开球时间落 SCHEDULED/POSTPONED。game_id 沿用 `E{yyyy}-{code:04d}`
+  约定，SourceGameLedger 记 source_id=code，后续深度刷新复用同一行。
+  缓存策略：已计分或未到开球+6h 的 header 复用，过期无分 header 重拉
+  （live 端只在赛后出分）。首轮实跑：70 场 FINAL 全落库，停在第 73 号
+  空码（第 8 轮尚未编号）。
+
+### 状态映射（官网 7 档 → PlayerAvailabilityStatus）
+
+Ready→AVAILABLE 1.0（行不落库，无信息量，计数）｜Expected→PROBABLE
+0.75｜Questionable/Game-time/Uncertain→QUESTIONABLE 0.5｜Doubtful→
+DOUBTFUL 0.25｜Out→OUT 0.0（硬规则）。未知状态/未知球队 fail-loud。
+`Round` 列是真定向信息："Round 5"/"Round 5-6" 解析为轮次集合，只挂目标
+轮的比赛；"Indefinitely/Long-term/Out for season" 开放式挂窗口内全部。
+轮次对照来自 E2026 原始 Header bundle；轮次映射缺失时计数不猜。
+球员身份是**名字字符串**（尚无名单源）：首次见到即注册 `ELP-<规范化名>`
+players 行（幂等 upsert）；名字归一（NFD 去音符+casefold）同时服务
+boxscore 的 "LAST, FIRST" 格式。availability 仍只挂**未来**场次
+（source_time < 开球，泄漏规则结构性成立）。
+
+### DNP 对账（OUT 查准率，两种模式）
+
+* 存储模式（`dnp-audit`）：availability 表里 source=basketnews 的 OUT 行
+  对照已完赛 Boxscore。
+* 快照模式（`dnp-audit --snapshot <file> --as-of <date>`）：历史报告不经过
+  availability 表（它们只挂未来场），直接拿快照 OUT 记录对 `[as-of-lookback,
+  as-of]` 内该队 FINAL 场（按 Round 定向过滤）核对。纯测量，零写库。
+* 分类：上场分钟>0 → **误报**；名单内 0 分钟 → **确认（rostered）**；
+  不在 12 人比赛名单 → **确认（absent）**单列——EL boxscore 只列 12 人
+  比赛名单，缺席本身就是 OUT 的佐证，但名字格式漏配也会落这桶，两桶
+  永不静默合并。查准率=(rostered+absent)/decided。
+* **诚实边界：只测查准率。** 召回率（漏报的缺席者）没有名单源不可测——
+  未被报告的健康球员和未被报告的伤员在 boxscore 里长得一样。
+
+### 首份实测（Round 5 时点渲染快照，n=2 不作统计结论）
+
+Isaia Cordinier（Efes，Out/Indefinitely）对窗口内两场 FINAL
+（E2026-0040/0049）：两场 12 人名单均无此人（对照原始 Boxscore 人工核实）
+→ confirmed_absent=2，查准率 100%（样本 2，仅证明机制，无统计意义）。
+快照是 webreader 渲染的部分转写（仅逐字确认的行），manifest 已如实标注。
+
+### 连带修复（预先存在的缺口）
+
+`test_production_loop.py` 只 stub 了 ESPN injuries，ACB edition→clubId 桥
+是活网调用（缓存冷时真实请求 acb.com）——本次全量回归时 ACB 端点 TLS 握手
+挂起拖死整个套件（faulthandler 栈定位）。按既有 stub 模式补齐（同文件
+autouse fixture），套件恢复确定性：**1079 passed + 1 skipped**（12-J 新增
+41 测试）。
+
+### 12-I 追记（2026-10-25）：21+ 拆分为 21~25 与 26+
+
+应用户要求把顶端桶拆开：`MARGIN_RANGE_BUCKETS` 由 11 桶改 **13 桶**
+（away_26_plus/away_21_25 … home_21_25/home_26_plus），完备分割与概率和
+恒 1 不变；`_range_label` 原本就泛化（hi=None→"26+"，区间→"21-25"），前端
+由 API 的 range 标签驱动无需改动。边界语义：20 归 16-20，21 归 21-25，
+26 归 26+。API/单元测试同步（桶数、首尾桶码、样本边界 20/21/26）。
+
+## 12-K 大小球（Over/Under）盘口概率（2026-10-25 追加）
+
+`agents/spread_probability.py` 新增 totals 层（与让分层同构）：
+`validate_total_line`（0.5 步长、80–400 合理域，fail-loud）、
+`totals_from_samples`（对 MC 逐场 `SimulationRun.total` 直接计数，
+整数盘走水计入 push）、`totals_from_normal`（连续性修正正态：大球边界
+`floor(line)+0.5`、小球边界 `ceil(line)−0.5`——整数盘保留走水质量，
+半球盘走水恒 0）、`fit_total_sigma`（as-of-safe 历史总分 σ，样本不足
+回退冻结默认 16.0）。
+
+**口径诚实性**：让分层的两个供给方是独立家族（Elo vs 模拟）；大小球没有
+Elo 类似物（Elo 只给胜率不给总分），所以 normal 供给方 = 模拟期望总分 μ
++ 历史联赛总分 σ，**明确标注为"标注过的平滑"而非独立家族**——它的价值
+是对照模拟自身 σ 与历史 σ 的分歧（历史 σ 偏保守：含已被均值解释的实力
+方差）。默认供给方一律 `simulation_samples`（无 totals 校准表之前不装
+测量结论）。
+
+API `predict` 请求新增 `total_line`（如 190 / 190.5），响应新增 `totals`
+块：`{total_line, default_source, sigma, simulation_samples:{over,push,
+under}, normal:{...}}`。前端"大小球"卡：输入总分盘口即出
+大球/走水/小球概率 + 另一口径对照 + 历史总分 σ。测试：单元 11 个
+（步长/域/边界/对称性要求均值在半整数边界上/σ 拟合）+ API 集成 4 个
+（块形状/和为 1/半球无走水/整数盘有走水/坏盘 400）。
+
+## 12-L 模拟器 PPP 实现修复 + 校准产物重跑（2026-10-25 追加）
+
+### 用户观察："大小球几乎全是偏小球"——诊断属实，两层原因
+
+**第一层（bug，已修）**：`models/score_model.py` 的 `rescale_to_ppp` 把
+采样分布校准到目标 PPP 时，延续概率漏乘 `p_fga`——前场板只能跟在**出手
+投丢**后面，而出手只以 `p_fga` 概率发生（失误/罚球回合终结）。旧公式
+`1/(1-orb*(1-made))` 高估延续 → 校准后的采样器实测每回合得分比记录目标
+低 3.8%（实测 NBA26-0021：采样器 1.0813 vs 记录 1.1240；修正闭式解
+1.0841 = 20 万次抽样实测 1.1219 在噪声内一致）。每场模拟因此丢 ~7 分，
+而大小球默认口径（MC 样本）吃满全部偏差——210 的模拟总分对 220+ 的
+真实 NBA，任何正常盘口都偏小球。
+
+**第二层（模型校准，非 bug）**：30 场 as-of 回测解析期望总分 215.5 vs
+实际 220.9（−5.4，σ=16.2）——pace/PPP 模型对当前比赛的校准差距，诚实
+保留；"模型 vs 盘口"的分歧本身是信号而非错误。另查明：预测代理未把
+名单传给 MonteCarloRunner（`prediction_agent.py:139`），伤停层实际不
+参与模拟——独立问题，与本次偏差无关，留待后续。
+
+### 修复与验证
+
+公式：`s = [T(1−p_fga·orb)−b] / [a−T·p_fga·orb·c]`，implied 同步改为
+`per_opp/(1−p_fga·miss·orb)`。合同测试钉死"解析递归期望 == 记录
+implied（abs 1e-12）"与"10 万次抽样 == 记录 implied（±0.015）"两档；
+两处手算常数按修正公式重钉（test_game_params 的 p2/p3 引脚、
+test_possession 的 break-even）。全量回归 **1097 passed + 1 skipped**。
+
+修复后 30 场回测复测：MC 均值对实际总分的偏差 **−12.5 → −2.2**（默认
+口径）；解析期望 −5.4 不变（第二层）。单场 MC-vs-解析 gap：−7.10 →
++0.41（回合数取整与 OT 解释）。
+
+### 校准产物重跑（修复使旧表失真）
+
+* `confidence-calibrate`（storage/calibration/confidence_calibration.json，
+  8,933 场 walk-forward × 300 sims）：整表重跑完成（2026-10-25 落盘，
+  API 按 mtime 热加载）。新表六联赛 walk-forward 档位命中率已按修正后
+  模拟输出拟合；抽样 BSL：elo 最大档 0.60-0.65 n=77 rate=0.571，
+  simulation 最大档 0.60-0.65 n=86 rate=0.616。
+* 六联赛让分口径实验（12-H 决策表同窗口复跑，实测 2026-10-25）：修复后
+  排名全部不变——NBA 0.4338 vs 0.4577、EUROLEAGUE 0.4269 vs 0.4396、
+  ACB 0.3577 vs 0.3766、CBA 0.3150 vs 0.3347、BSL 0.3808 vs 0.3856
+  （elo_normal 胜）；NBL 0.5193 vs 0.5203（simulation_samples 仍以更小
+  差距险胜，维持模拟默认）。elo_normal 口径不消费 MC 样本，其 logloss
+  逐位不变（0.4446→0.4338 的 NBA 变化来自 σ 历史窗口滚动），模拟口径
+  因修复整体改善。`SPREAD_SOURCE_BY_LEAGUE` 维持原判。
+* 边际 σ（`fit_margin_sigma`）与总分 σ（`fit_total_sigma`）按真实历史
+  比分实时拟合，不受模拟器影响——无需重跑。

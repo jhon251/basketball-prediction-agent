@@ -66,8 +66,10 @@ class TestGamePredictionParams:
         assert p.p_tov == pytest.approx(0.1138804, abs=1e-5)
         assert p.p_fta == pytest.approx(0.0970385, abs=1e-5)
         assert p.p_fga == pytest.approx(0.7890810, abs=1e-5)
-        assert p.p2_pct == pytest.approx(0.4751462, abs=1e-5)
-        assert p.p3_pct == pytest.approx(0.3649208, abs=1e-5)
+        # 12-L re-pin: the rescale fix (p_fga in the continuation term)
+        # raises the shooting percentages needed for the same target PPP
+        assert p.p2_pct == pytest.approx(0.4940308, abs=1e-5)
+        assert p.p3_pct == pytest.approx(0.3794246, abs=1e-5)
 
     def test_elo_win_prob_passthrough(self, scheduled_target):
         features, params = make_params(scheduled_target)

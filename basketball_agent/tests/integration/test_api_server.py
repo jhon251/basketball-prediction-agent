@@ -169,9 +169,9 @@ class TestMarginRanges:
     def test_block_shape_and_sums(self, app, _future_target):
         out = app.predict(PredictRequest(game_id=_future_target.game_id))
         block = out["margin_ranges"]
-        assert len(block["buckets"]) == 11
-        assert [b["code"] for b in block["buckets"]][0] == "away_20_plus"
-        assert [b["code"] for b in block["buckets"]][-1] == "home_20_plus"
+        assert len(block["buckets"]) == 13
+        assert [b["code"] for b in block["buckets"]][0] == "away_26_plus"
+        assert [b["code"] for b in block["buckets"]][-1] == "home_26_plus"
         tie = next(b for b in block["buckets"] if b["code"] == "tie")
         assert tie["side"] == "tie"
         for src in ("simulation_samples", "elo_normal"):
@@ -189,3 +189,53 @@ class TestMarginRanges:
                      if b["side"] == "home" and b["simulation_samples"])
         sim_p = out["families"]["simulation"]
         assert home_p == pytest.approx(sim_p, abs=1e-9)
+
+
+class TestTotals:
+    """Phase 12-K: 大小球 over/under block."""
+
+    def test_block_shape_and_sums(self, app, _future_target):
+        out = app.predict(PredictRequest(
+            game_id=_future_target.game_id, total_line=190.5))
+        block = out["totals"]
+        assert block["total_line"] == 190.5
+        assert block["default_source"] == "simulation_samples"
+        assert block["sigma"] > 0
+        for src in ("simulation_samples", "normal"):
+            probs = block[src]
+            assert probs is not None
+            assert abs(sum(probs[k] for k in ("over", "push", "under"))
+                       - 1.0) < 1e-9
+        # half-point line vs integer simulated totals: no push anywhere
+        assert block["simulation_samples"]["push"] == 0.0
+        assert block["normal"]["push"] == 0.0
+
+    def test_integer_line_push_mass(self, app, _future_target):
+        out = app.predict(PredictRequest(
+            game_id=_future_target.game_id, total_line=190))
+        block = out["totals"]
+        assert block["normal"]["push"] > 0.0
+        assert abs(sum(block["normal"][k]
+                       for k in ("over", "push", "under")) - 1.0) < 1e-9
+
+    def test_absent_without_line(self, app, _future_target):
+        out = app.predict(PredictRequest(game_id=_future_target.game_id))
+        assert out["totals"] is None
+
+    def test_quarter_line_rejected(self, app, _future_target):
+        with pytest.raises(Exception):
+            app.predict(PredictRequest(
+                game_id=_future_target.game_id, total_line=190.3))
+
+    def test_line_errors_map_to_400(self, app, _future_target):
+        # client-input line errors are ApiError(400) at the app layer —
+        # the HTTP handler turns ApiError into the status code, so these
+        # can never surface as 500s
+        with pytest.raises(ApiError) as ei:
+            app.predict(PredictRequest(
+                game_id=_future_target.game_id, total_line=190.3))
+        assert ei.value.status == 400
+        with pytest.raises(ApiError) as ei2:
+            app.predict(PredictRequest(
+                game_id=_future_target.game_id, home_line=-3.7))
+        assert ei2.value.status == 400

@@ -143,23 +143,24 @@ class TestMarginRanges:
             MARGIN_RANGE_BUCKETS, margin_ranges_from_samples,
         )
         rows = margin_ranges_from_samples(
-            [-25, -18, -12, -7, -3, 0, 2, 8, 13, 17, 24])
+            [-30, -25, -18, -12, -7, -3, 0, 2, 8, 13, 17, 24, 30])
         assert [r["code"] for r in rows] == [
             b[0] for b in MARGIN_RANGE_BUCKETS]
-        # one sample per bucket -> every bucket exactly 1/11
+        # one sample per bucket -> every bucket exactly 1/13
         for r in rows:
-            assert r["probability"] == pytest.approx(1 / 11)
+            assert r["probability"] == pytest.approx(1 / 13)
 
     def test_sample_edge_values(self):
-        # 20 belongs to 16-20; 21 to 20+; 1 and 5 to 1-5
+        # 20 belongs to 16-20; 21 to 21-25; 26 to 26+; 1 and 5 to 1-5
         from basketball_agent.agents.spread_probability import (
             margin_ranges_from_samples,
         )
-        rows = margin_ranges_from_samples([20, 21, 1, 5])
+        rows = margin_ranges_from_samples([20, 21, 26, 1, 5])
         by = {r["code"]: r["probability"] for r in rows}
-        assert by["home_16_20"] == pytest.approx(0.25)
-        assert by["home_20_plus"] == pytest.approx(0.25)
-        assert by["home_1_5"] == pytest.approx(0.5)
+        assert by["home_16_20"] == pytest.approx(0.2)
+        assert by["home_21_25"] == pytest.approx(0.2)
+        assert by["home_26_plus"] == pytest.approx(0.2)
+        assert by["home_1_5"] == pytest.approx(0.4)
 
     def test_samples_sum_to_one_with_ties(self):
         from basketball_agent.agents.spread_probability import (
@@ -184,7 +185,7 @@ class TestMarginRanges:
         rows = margin_ranges_from_normal(0.0, 12.0)
         by = {r["code"]: r["probability"] for r in rows}
         assert by["home_1_5"] == pytest.approx(by["away_1_5"], abs=1e-9)
-        assert by["home_20_plus"] == pytest.approx(by["away_20_plus"],
+        assert by["home_26_plus"] == pytest.approx(by["away_26_plus"],
                                                    abs=1e-9)
         assert sum(r["probability"] for r in rows) == pytest.approx(
             1.0, abs=1e-9)
@@ -196,7 +197,7 @@ class TestMarginRanges:
         rows = margin_ranges_from_normal(6.0, 12.0)
         by = {r["code"]: r["probability"] for r in rows}
         assert by["home_6_10"] > by["away_6_10"]
-        assert by["home_20_plus"] > by["away_20_plus"]
+        assert by["home_26_plus"] > by["away_26_plus"]
 
     def test_normal_bad_sigma_fails(self):
         from basketball_agent.agents.spread_probability import (
@@ -204,3 +205,91 @@ class TestMarginRanges:
         )
         with pytest.raises(ValueError):
             margin_ranges_from_normal(0.0, 0.0)
+
+
+class TestTotals:
+    """Phase 12-K: 大小球 over/under providers."""
+
+    def test_validate_accepts_half_points(self):
+        from basketball_agent.agents.spread_probability import (
+            validate_total_line,
+        )
+        assert validate_total_line(190) == 190.0
+        assert validate_total_line("190.5") == 190.5
+
+    def test_validate_rejects_quarter_and_absurd(self):
+        from basketball_agent.agents.spread_probability import (
+            TotalLineError, validate_total_line,
+        )
+        with pytest.raises(TotalLineError):
+            validate_total_line(190.3)
+        with pytest.raises(TotalLineError):
+            validate_total_line(79.5)
+        with pytest.raises(TotalLineError):
+            validate_total_line(400.5)
+
+    def test_samples_over_under_push(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_samples,
+        )
+        r = totals_from_samples([189, 190, 191, 195, 185], 190.5)
+        assert (r.over, r.push, r.under) == (0.4, 0.0, 0.6)
+        r2 = totals_from_samples([190, 190, 191, 195], 190)
+        assert (r2.over, r2.push, r2.under) == (0.5, 0.5, 0.0)
+        for x in (r, r2):
+            assert x.over + x.push + x.under == pytest.approx(1.0)
+
+    def test_samples_empty_fails(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_samples,
+        )
+        with pytest.raises(ValueError):
+            totals_from_samples([], 190.5)
+
+    def test_normal_integer_line_has_push(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_normal,
+        )
+        r = totals_from_normal(191.0, 16.0, 190)
+        assert r.push > 0.0
+        assert r.over + r.push + r.under == pytest.approx(1.0)
+
+    def test_normal_half_line_no_push(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_normal,
+        )
+        r = totals_from_normal(191.0, 16.0, 190.5)
+        assert r.push == 0.0
+        assert r.over + r.under == pytest.approx(1.0)
+
+    def test_normal_line_at_mean_is_symmetric(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_normal,
+        )
+        # the continuity boundary sits on the half-integer, so symmetry
+        # requires the MEAN on that boundary too (integer mean is not
+        # symmetric around a half-point line)
+        r = totals_from_normal(191.5, 16.0, 191.5)
+        assert r.over == pytest.approx(r.under, abs=1e-9)
+
+    def test_normal_bad_sigma_fails(self):
+        from basketball_agent.agents.spread_probability import (
+            totals_from_normal,
+        )
+        with pytest.raises(ValueError):
+            totals_from_normal(191.0, 0.0, 190.5)
+        with pytest.raises(ValueError):
+            totals_from_normal(191.0, float("nan"), 190.5)
+
+    def test_fit_total_sigma(self):
+        from basketball_agent.agents.spread_probability import (
+            fit_total_sigma,
+        )
+        assert fit_total_sigma([200.0] * 10) > 0  # fallback default
+        assert fit_total_sigma([200.0] * 10) == fit_total_sigma([1.0])
+        long_hist = [190.0 + (i % 7) for i in range(300)]
+        assert fit_total_sigma(long_hist) == pytest.approx(
+            fit_total_sigma(long_hist))  # deterministic
+        import statistics as _st
+        assert fit_total_sigma(long_hist) == pytest.approx(
+            _st.stdev(long_hist))

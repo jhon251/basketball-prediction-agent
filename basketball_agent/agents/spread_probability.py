@@ -1,4 +1,5 @@
-"""Spread (让分) cover probability layer (Phase 12-A).
+"""Spread (让分) cover probability layer (Phase 12-A) + totals (大小球)
+over/under layer (Phase 12-K).
 
 Conventions
 -----------
@@ -174,7 +175,8 @@ def fit_margin_sigma(
 # margin lands in exactly one bucket, so the probabilities sum to 1
 # (ties exist in the frozen simulator's regulation-length samples).
 MARGIN_RANGE_BUCKETS: tuple[tuple[str, str, int | None, int | None], ...] = (
-    ("away_20_plus", "away", None, -21),
+    ("away_26_plus", "away", None, -26),
+    ("away_21_25", "away", -25, -21),
     ("away_16_20", "away", -20, -16),
     ("away_11_15", "away", -15, -11),
     ("away_6_10", "away", -10, -6),
@@ -184,7 +186,8 @@ MARGIN_RANGE_BUCKETS: tuple[tuple[str, str, int | None, int | None], ...] = (
     ("home_6_10", "home", 6, 10),
     ("home_11_15", "home", 11, 15),
     ("home_16_20", "home", 16, 20),
-    ("home_20_plus", "home", 21, None),
+    ("home_21_25", "home", 21, 25),
+    ("home_26_plus", "home", 26, None),
 )
 
 
@@ -231,3 +234,117 @@ def _range_label(lo: int | None, hi: int | None) -> str:
         return "平"
     a, b = abs(lo), abs(hi)
     return f"{min(a, b)}-{max(a, b)}"
+
+
+# ---------------------------------------------------------------- totals
+# Phase 12-K: 大小球 (over/under).  Mirror of the spread layer: the
+# samples provider counts the frozen Monte Carlo per-run totals
+# (``SimulationRun.total``); the normal provider is an explicitly
+# LABELLED smoothing — mu from the simulation's expected total, sigma
+# from as-of-safe league history (no Elo analog exists for totals, so
+# this is NOT an independent family, unlike the spread's elo_normal).
+_DEFAULT_TOTAL_SIGMA = 16.0  # frozen fallback: league total σ ≈ 15–20
+
+
+class TotalLineError(ValueError):
+    """Invalid total line (not a multiple of 0.5 / out of range)."""
+
+
+@dataclass(frozen=True)
+class TotalProbabilities:
+    over: float
+    push: float
+    under: float
+    total_line: float
+    method: str  # "simulation_samples" | "normal"
+
+    def __post_init__(self) -> None:
+        total = self.over + self.push + self.under
+        if not math.isclose(total, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(
+                f"total probabilities must sum to 1, got {total}")
+        for name in ("over", "push", "under"):
+            v = getattr(self, name)
+            if not 0.0 <= v <= 1.0:
+                raise ValueError(f"{name} out of [0,1]: {v}")
+
+
+def validate_total_line(total_line: float) -> float:
+    """Fail loudly on non-half-point or absurd totals lines."""
+    x = float(total_line)
+    if not math.isfinite(x):
+        raise TotalLineError("total_line must be finite")
+    if not 80.0 <= x <= 400.0:
+        raise TotalLineError(f"total_line {x} outside plausible range 80-400")
+    if not abs(x * 2 - round(x * 2)) < 1e-9:
+        raise TotalLineError(
+            f"total_line {x} is not a multiple of 0.5 (betting lines only)")
+    return round(x * 2) / 2
+
+
+def totals_from_samples(
+    totals: Sequence[int], total_line: float,
+) -> TotalProbabilities:
+    """Empirical over/push/under from integer total samples."""
+    line = validate_total_line(total_line)
+    if len(totals) == 0:
+        raise ValueError("totals must not be empty")
+    over = push = under = 0
+    for t in totals:
+        if t > line + 1e-9:
+            over += 1
+        elif t < line - 1e-9:
+            under += 1
+        else:
+            push += 1
+    n = len(totals)
+    return TotalProbabilities(
+        over=over / n, push=push / n, under=under / n,
+        total_line=line, method="simulation_samples",
+    )
+
+
+def totals_from_normal(
+    mean: float, sigma: float, total_line: float,
+) -> TotalProbabilities:
+    """Continuity-corrected normal over/push/under for integer totals.
+
+    Over boundary ``U = floor(line) + 0.5`` (T >= ceil(line)), under
+    boundary ``L = ceil(line) - 0.5`` (T <= floor(line)); an integer
+    line keeps push mass in ``[L, U]``, a half-point line gets none.
+    """
+    line = validate_total_line(total_line)
+    s = float(sigma)
+    if not math.isfinite(s) or s <= 0.0:
+        raise ValueError(f"sigma must be positive and finite, got {sigma}")
+    upper = math.floor(line) + 0.5
+    lower = math.ceil(line) - 0.5
+    over = 1.0 - _NORMAL.cdf((upper - mean) / s)
+    under = _NORMAL.cdf((lower - mean) / s)
+    over = min(max(over, 0.0), 1.0)
+    under = min(max(under, 0.0), 1.0 - over)
+    return TotalProbabilities(
+        over=over, push=1.0 - over - under, under=under,
+        total_line=line, method="normal",
+    )
+
+
+def fit_total_sigma(
+    totals: Sequence[float], *,
+    min_samples: int = 200,
+    default: float = _DEFAULT_TOTAL_SIGMA,
+) -> float:
+    """As-of-safe sigma from historical final totals.
+
+    Falls back to the frozen default when the history is too short or
+    degenerate — callers must pass ONLY totals from games strictly
+    before the prediction moment (leakage rule §2).  Raw league-wide
+    stdev is deliberately conservative (it contains strength variance
+    the mean already explains); the simulation samples stay primary.
+    """
+    if len(totals) < min_samples:
+        return default
+    s = stdev(totals)
+    if not math.isfinite(s) or s < 1.0:
+        return default
+    return s

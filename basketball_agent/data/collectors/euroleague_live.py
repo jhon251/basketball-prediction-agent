@@ -72,6 +72,7 @@ TEAM_TIMEZONES: dict[str, str] = {
     "ZAL": "Europe/Vilnius",    # Zalgiris Kaunas
     "DUB": "Asia/Dubai",        # Dubai Basketball (joined 2025-26)
     "HTA": "Asia/Jerusalem",    # Hapoel IBI Tel Aviv (joined 2025-26)
+    "BES": "Europe/Istanbul",   # Besiktas Istanbul (joined 2026-27)
     # seasons E2019-E2021 only (Russian clubs were excluded from 2022-23 on);
     # canonical ids are the official CodeTeam values observed in those bundles
     "CSK": "Europe/Moscow",     # CSKA Moscow
@@ -93,7 +94,8 @@ for _canon, _aliases in {
     "MAD": ("rma", "rmb", "real madrid", "real madrid baloncesto"),
     "BAR": ("fcb", "barcelona", "fc barcelona", "fc barcelona lassa"),
     "BAS": ("baskonia", "baskonia vitoria-gasteiz", "baskonia alaves",
-            "saski baskonia"),
+            "saski baskonia",
+            "kosner baskonia vitoria-gasteiz"),  # BasketNews spelling
     "VAL": ("pam", "vbc", "valencia", "valencia basket"),
     "ULK": ("fen", "fbb", "fenerbahce", "fenerbahce beko istanbul",
             "fenerbahce ulker istanbul"),
@@ -110,7 +112,9 @@ for _canon, _aliases in {
             "crvena zvezda mts belgrade", "crvena zvezda meridianbet belgrade"),
     "VIR": ("bol", "virtus", "virtus bologna", "virtus segafredo bologna"),
     "MIL": ("eam", "ax milan", "olimpija milan", "milan",
-            "ea7 emporio armani milan", "emporio armani milan"),
+            "ea7 emporio armani milan", "emporio armani milan",
+            "armani olimpia milan",  # BasketNews spelling
+            ),
     "CSK": ("cska", "cska moscow"),
     "DYR": ("zen", "zenit", "zenit st petersburg", "zenit saint petersburg"),
     "UNK": ("uni", "unics", "unics kazan"),
@@ -118,6 +122,8 @@ for _canon, _aliases in {
     "DUB": ("dubai", "dubai basketball"),
     "HTA": ("hta", "hapoel tel aviv", "hapoel ibi tel aviv",
             "hapoel hapoel tel aviv"),
+    "BES": ("bjk", "besiktas", "besiktas istanbul",
+            "besiktas gedik yatirim istanbul"),
 }.items():
     for _alias in _aliases:
         ALIAS_TO_TEAM.setdefault(_alias, _canon)

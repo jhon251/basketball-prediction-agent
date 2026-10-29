@@ -273,3 +273,15 @@ LiveStats 端点收紧 → nbl.com.au 官方 gamecenter（JS 渲染，抓取成�
 存储：`game_odds` 表（append-only, UNIQUE 约束, FK→games）
 去水：`evaluation/devig.py`（multiplicative，保守近似）
 评估：`evaluation/roi.py`（flat-stake ROI, edge threshold sweep）
+
+## 8. EuroLeague 伤停源（Phase 12-J）
+
+### 主源：BasketNews《EuroLeague Injury Report (updated daily)》🟡 渲染快照通道
+- 文章：`https://basketnews.com/news-212393-euroleague-injury-report-updated.html`（每日更新，20 队全覆盖，官网自带 7 档状态色标：Ready/Expected/Questionable/Game-time/Doubtful/Out/Uncertain，表结构 `| P | Player | Status | Round | Comments |` 按队分段）。
+- **直连不可行（12-J 取证）**：首页/文章/RSS 对裸 HTTP 全部 403（Cloudflare，完整浏览器头亦然）。采集=渲染快照文件（浏览器另存/渲染服务）→ `basketnews-injuries --file`；HTML 快照由 stdlib html.parser 保表格结构转管道行，与 markdown 同路径解析。快照+sha256 manifest 落 `storage/raw/basketnews/`。
+- 状态映射钉死：Out→OUT 0.0、Ready→AVAILABLE 1.0（AVAILABLE 行不落库）、其余显式映射，未知 fail-loud；`Round` 列解析为轮次定向（"Round 5-6"→{5,6}，开放式挂全窗口）。
+- 备源：basketballsphere.com/en/injuries/euroleague（200 可达，12-J 未接入）；Rotowire EuroLeague injuries（未接入）。
+
+### EL E2026 赛程自举（12-J）
+- `euroleague-fixtures --season E2026`：枚举 live Header gameCode（连续 3 空码停），有分场次连 Boxscore 过 season-refresh 解析器落 FINAL+球队统计；game_id=`E2026-XXXX` 与深度刷新同约定，ledger 去重。原始 header/boxscore 累积进 `storage/raw/euroleague_live/euroleague_E2026_raw.json`（可离线重放 validate→ingest）。
+- 首轮实跑（2026-10-25）：70 场 FINAL（第 1-7 轮）全部落库；第 8 轮赛程尚未编号（第 73 号起连续空码停）。

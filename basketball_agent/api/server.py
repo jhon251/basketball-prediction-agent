@@ -35,9 +35,16 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from basketball_agent.agents.prediction_agent import PredictionAgent
 from basketball_agent.agents.risk_analysis import RiskAnalysisAgent
 from basketball_agent.agents.spread_probability import (
+    SpreadLineError,
+    TotalLineError,
     cover_from_elo_normal,
     cover_from_samples,
     fit_margin_sigma,
+    fit_total_sigma,
+    totals_from_normal,
+    totals_from_samples,
+    validate_home_line,
+    validate_total_line,
 )
 from basketball_agent.api.matchup import (
     CHINESE_ALIASES_BY_LEAGUE,
@@ -49,11 +56,12 @@ from basketball_agent.data.db.repository import Repository
 from basketball_agent.data.schemas.base import GameStatus
 
 # Which spread provider is PRIMARY per league — decided by measurement
-# (docs/PHASE12_A_SPREAD_API.md §12-H): walk-forward line-probe logloss
-# per league.  elo_normal wins clearly in NBA (0.4446 vs 0.4692),
-# EuroLeague (0.4269 vs 0.4385), ACB (0.3577 vs 0.3779), CBA (0.3150 vs
-# 0.3331) and BSL (0.3824 vs 0.3941); NBL is a statistical tie where
-# simulation_samples measured marginally better (0.4972 vs 0.5025 on 163
+# (docs/PHASE12_A_SPREAD_API.md §12-H; re-measured post-12-L with the
+# PPP-rescale fix — ranking unchanged).  Walk-forward line-probe logloss
+# per league.  elo_normal wins clearly in NBA (0.4338 vs 0.4577),
+# EuroLeague (0.4269 vs 0.4396), ACB (0.3577 vs 0.3766), CBA (0.3150 vs
+# 0.3347) and BSL (0.3808 vs 0.3856); NBL is a statistical tie where
+# simulation_samples measured marginally better (0.5193 vs 0.5203 on 163
 # games) and keeps the simulation default.
 SPREAD_SOURCE_BY_LEAGUE: dict[str, str] = {
     "NBA": "elo_normal",
@@ -79,6 +87,7 @@ class PredictRequest(BaseModel):
     home: str | None = None
     away: str | None = None
     home_line: float | None = None
+    total_line: float | None = None  # 大小球盘口（190 / 190.5）
     as_of: str | None = None  # ISO-8601; default now UTC
     n_simulations: int | None = None
     family: str | None = None  # elo | strength | simulation
@@ -194,6 +203,22 @@ class BasketballApiApp:
         ]
         sigma = fit_margin_sigma(
             [g.home_score - g.away_score for g in finals])
+        self._sigma_cache[key] = sigma
+        return sigma
+
+    def _total_sigma(self, league: str, as_of: datetime) -> float:
+        """As-of-safe league-wide final-total sigma (Phase 12-K)."""
+        key = ("total", league, as_of.date().isoformat())
+        if key in self._sigma_cache:
+            return self._sigma_cache[key]
+        finals = [
+            g for g in self._repo.list_games(
+                as_of=as_of, status=GameStatus.FINAL)
+            if g.league.value == league
+            and g.home_score is not None and g.away_score is not None
+        ]
+        sigma = fit_total_sigma(
+            [g.home_score + g.away_score for g in finals])
         self._sigma_cache[key] = sigma
         return sigma
 
@@ -346,6 +371,12 @@ class BasketballApiApp:
 
         spread = None
         if req.home_line is not None:
+            # client-input errors are 400s, not 500s (validate early —
+            # the cover functions re-validate internally, harmlessly)
+            try:
+                validate_home_line(float(req.home_line))
+            except SpreadLineError as exc:
+                raise ApiError(str(exc), status=400) from exc
             line = float(req.home_line)
             source = (req.spread_source or default_source)
             if source not in ("elo_normal", "simulation_samples"):
@@ -368,6 +399,36 @@ class BasketballApiApp:
                     "home_cover": elo_cover.home_cover,
                     "push": elo_cover.push,
                     "away_cover": elo_cover.away_cover,
+                },
+            }
+
+        # Phase 12-K: 大小球 (over/under) — simulation samples primary,
+        # normal provider = sim expected total + as-of-safe league sigma
+        # (labelled smoothing, no independent family exists for totals)
+        totals = None
+        if req.total_line is not None:
+            try:
+                line = validate_total_line(float(req.total_line))
+            except TotalLineError as exc:
+                raise ApiError(str(exc), status=400) from exc
+            total_sigma = self._total_sigma(league, as_of)
+            run_totals = [r.total for r in prediction.monte_carlo.runs]
+            sim_totals = (totals_from_samples(run_totals, line)
+                          if run_totals else None)
+            normal_totals = totals_from_normal(
+                prediction.expected_total, total_sigma, line)
+            totals = {
+                "total_line": line,
+                "default_source": "simulation_samples",
+                "sigma": total_sigma,
+                "simulation_samples": (
+                    {"over": sim_totals.over, "push": sim_totals.push,
+                     "under": sim_totals.under}
+                    if sim_totals else None),
+                "normal": {
+                    "over": normal_totals.over,
+                    "push": normal_totals.push,
+                    "under": normal_totals.under,
                 },
             }
 
@@ -415,6 +476,7 @@ class BasketballApiApp:
                 "p95": margin_dist.p95,
             },
             "spread": spread,
+            "totals": totals,
             "margin_ranges": margin_ranges,
             "risk": {
                 "confidence": prediction.risk.confidence_score,
