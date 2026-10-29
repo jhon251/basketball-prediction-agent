@@ -125,3 +125,11 @@ basetemp). It adapts the environment only — no test assertions are affected.
 Ingestion is `parse → validate → load`. A single ERROR blocks the entire
 batch (one transaction, all-or-nothing). Check ids are stable machine-readable
 strings (e.g. `temporal.availability_source_time`, `consistency.team_stats`).
+
+
+## License
+
+MIT — see [LICENSE](LICENSE).  Open-source research project; no warranty.
+Scraped/acquired data is NOT included — every collector documents its source
+in `docs/DATA_SOURCES.md`, and users are responsible for complying with those
+sources' terms.
