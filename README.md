@@ -1,135 +1,174 @@
-# Basketball Simulation & Prediction Agent V1
+# Basketball Prediction Agent
 
-统计建模 + Monte Carlo 沙盘推演的篮球赛前预测系统。
-A pre-game basketball prediction system built on statistical modeling and Monte Carlo simulation.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-```text
-真实历史数据 → 清洗验证 → 特征 → 统计模型 → 比赛参数
-→ Possession-Level Simulation → Monte Carlo → 结果分布
-→ 胜负/分差/总分/比分概率 → Calibration + Backtest
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Tests](https://img.shields.io/badge/tests-1097%20passing-brightgreen)
+
+A pre-game basketball prediction system: statistical models + a
+possession-level Monte Carlo simulator, wrapped in an agent that collects,
+validates, predicts and audits itself. **Every probability comes from data,
+explicit formulas or simulation — never from an LLM.**
+
+**What it predicts for one game:**
+
+| Output | Providers |
+|---|---|
+| Win probability (home/away) | Elo · team-strength · possession-level Monte Carlo |
+| Spread cover (让分, incl. push on integer lines) | MC margin samples · continuity-corrected normal over Elo-implied margin |
+| Totals over/under (大小球, e.g. 190 / 190.5) | MC per-game totals · normal smoothing (explicitly labelled) |
+| Margin-range matrix (客胜 26+…1-5, 平, 主胜 1-5…26+) | sample counts · corrected normal |
+
+**Leagues:** NBA · EuroLeague · ACB (Spain) · NBL (Australia) · CBA (China) · BSL (Türkiye)
+— with per-league history isolation (leagues never share ratings or baselines),
+upcoming-fixture collection, and an injury/availability layer for NBA and EuroLeague.
+
+## Quick start
+
+No API keys required for this path (EuroLeague's public endpoint is keyless).
+
+```bash
+pip install -e .
+
+# 1) fetch raw season bundles (user-side, ~2 min per season)
+python tools/fetch_euroleague_bundle.py --seasons E2024 E2025 --out-dir storage/raw/euroleague_live
+
+# 2) validate (all-or-nothing) + ingest
+basketball validate storage/raw/euroleague_live/euroleague_E2024_raw.json
+basketball ingest   storage/raw/euroleague_live/euroleague_E2024_raw.json
+basketball ingest   storage/raw/euroleague_live/euroleague_E2025_raw.json
+
+# 3) current-season calendar (enumerates the live Header endpoint, settles played games)
+basketball euroleague-fixtures --season E2026
+
+# 4) web UI + local API (Chinese UI, English API fields)
+basketball serve --open            # http://127.0.0.1:8765
 ```
 
-## Core principles (规格书 §2)
+In the UI: pick a league and two teams (Chinese or English aliases both work),
+optionally enter a spread line (让 5.5 ⇒ `-5.5`) and/or a totals line (`190.5`),
+hit **预测**. Click a scheduled game in the list to pre-fill the matchup.
 
-1. **No LLM-generated probabilities.** Every probability comes from historical
-   data, explicit formulas, or Monte Carlo simulation. Agents only orchestrate,
-   validate, interpret and report.
-2. **Zero data leakage.** Features may only use information public at the
-   prediction moment. Any future information in a feature is a hard **FAIL**,
-   never a warning.
-3. **Reproducibility.** Same game + same data snapshot + same model version +
-   same seed ⇒ identical output. Deterministic and stochastic modes are both
-   supported.
-4. **Honest evaluation.** Walk-forward backtest, calibration and baselines are
-   mandatory; results are reported even when the simulation does not beat a
-   simple baseline.
+### CLI prediction
 
-## Storage
+```bash
+basketball predict <game_id> --as-of 2024-11-19T12:00:00+00:00 \
+    --n-simulations 10000 --seed 42 --save
+basketball settle <game_id>        # after the game is FINAL
+```
 
-V1 uses **SQLite** (zero-config, file-based, snapshot-friendly). The
-`Repository` layer isolates all SQL so a server database can replace SQLite
-later without touching models. Snapshots are byte-exact DB copies with a
-SHA-256-checksummed manifest; every prediction must cite its snapshot id.
+Same input + same data snapshot + same seed ⇒ byte-identical output.
 
-## Layout
+### API
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/predict \
+  -H "Content-Type: application/json" \
+  -d '{"game_id": "NBA26-0021", "home_line": -3.5, "total_line": 224.5}'
+```
+
+```json
+{
+  "win_probability": {"home": 0.577, "away": 0.423, "primary_family": "simulation"},
+  "families":        {"elo": 0.612, "strength": 0.598, "simulation": 0.577},
+  "spread":  {"home_line": -3.5, "elo_normal": {"home_cover": 0.53, "push": 0.0, "away_cover": 0.47}, "...": "..."},
+  "totals":  {"total_line": 224.5, "simulation_samples": {"over": 0.32, "push": 0.0, "under": 0.68}, "...": "..."},
+  "margin_ranges": {"buckets": [{"code": "away_26_plus", "range": "26+", "elo_normal": 0.021, "simulation_samples": 0.013}, "...": "..."]},
+  "risk": {"confidence": 0.71, "flags": []},
+  "explanation": "…"
+}
+```
+
+Where provider choices disagree, **both are returned** (e.g. `elo_normal` vs
+`simulation_samples`) instead of hiding the disagreement — the frontend shows
+both, and a `model_disagreement` risk flag fires when it matters.
+
+## How it works
+
+```text
+real history → validate → features (as-of-safe) → models (Elo / PPP / pace / shot mix)
+→ possession-level simulation → Monte Carlo → distributions
+→ win / spread / totals / margin-range probabilities
+→ walk-forward backtest → calibration → honest confidence
+```
+
+* **Feature pipeline** — Elo, offensive/defensive ratings, pace, shooting,
+  rebounding, turnovers; exponential time decay, rest days, availability.
+  Features may only use information public at the prediction moment; any
+  future information is a hard **FAIL** (leakage tests), never a warning.
+* **Models → simulator** — team params become per-possession distributions
+  (turnover / free-throw trip / 2PT or 3PT attempt, offensive-rebound
+  continuation); the game clock bounds possessions, overtimes emerge
+  naturally. 10k sims ≈ 1.7 s per game.
+* **Evaluation** — walk-forward backtests only (no random splits),
+  logloss/Brier/ECE against constant-probability baselines; results are
+  reported even when a plain Elo rating beats the whole simulator.
+* **Storage** — SQLite behind a repository interface; snapshots are
+  byte-exact DB copies with SHA-256 manifests; predictions cite their snapshot.
+
+### Measured findings (reported as measured, not as marketing)
+
+* On 17 NBA seasons (20,440 games), **plain Elo out-predicts the frozen
+  simulator** in every test window — and the system says so itself
+  ([docs/MULTI_SEASON_RESULTS.md](docs/MULTI_SEASON_RESULTS.md)).
+* Per-league spread-provider defaults were chosen by walk-forward line-probe
+  logloss, not taste: `elo_normal` wins in NBA / EuroLeague / ACB / CBA / BSL;
+  NBL is a statistical tie that keeps the simulation default
+  ([docs/PHASE12_A_SPREAD_API.md](docs/PHASE12_A_SPREAD_API.md) §12-H).
+* A simulator bug (sampler realized ~3.8% fewer points per possession than
+  its recorded target) was found *by asking why totals always leaned under*,
+  fixed, and re-calibrated: MC-vs-actual totals bias on a 30-game walk-forward
+  went −12.5 → −2.2 points (§12-L). The contract tests now pin the closed
+  form to the sampler within Monte-Carlo noise.
+
+## Data
+
+**No data is bundled.** Collectors run against public endpoints; each one
+documents its source, auth and known quirks in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md):
+
+| League | Source | Auth |
+|---|---|---|
+| NBA (history) | stats.nba.com gamelog / llimllib parquet mirrors | none |
+| NBA (fixtures, injuries) | site.api.espn.com | none |
+| EuroLeague | live.euroleague.net API | none |
+| ACB | api2.acb.com (site's own public client key) | public key |
+| NBL / BSL / CBA | league live endpoints (CBA: AES-JSON) | none |
+
+You are responsible for complying with each source's terms of service; this
+repository ships code only.
+
+## Development notes
+
+* **Tests:** `pip install -e ".[dev]"` then `pytest -q` — 1,097 tests, no
+  network required (collectors are stubbed at the seam; live smokes are run
+  manually and recorded in `docs/`).
+* **Docs/** is a real development archive: per-phase design notes, decision
+  records, calibration experiments and honest failure reports (e.g. Phase 8-B2
+  "simulation ≈ random on the 5-season window"). Read
+  [PHASE12_A_SPREAD_API.md](docs/PHASE12_A_SPREAD_API.md) for the prediction
+  API layer and [DATA_SOURCES.md](docs/DATA_SOURCES.md) before collecting.
+
+## Project layout
 
 ```text
 basketball_agent/
-├── config/          settings (paths, default seed / n_simulations)
-├── data/
-│   ├── schemas/     pydantic models (Game, TeamGameStats, PlayerGameStats, PlayerAvailability, ...)
-│   ├── validators/  data-quality checks + raw-record parsing
-│   ├── db/          SQLite DDL, connection manager, repository, guarded ingestion
-│   ├── snapshots/   snapshot manager (byte-exact copy + manifest)
-│   └── collectors/  real data sources (later phase)
-├── features/        feature pipeline (Phase 2)
-├── models/          Elo / offense-defense / pace / score models (Phase 3)
-├── simulation/      possession-level engine + Monte Carlo (Phase 4)
-├── agents/          validation agent (done); risk / ensemble etc. (later)
-├── evaluation/      backtest, metrics, calibration, leakage (Phase 5)
-├── api/             API layer (later)
-├── cli/             ``basketball predict <game_id>`` (final phase)
-└── tests/           unit / integration / regression / leakage / simulation
+├── data/            pydantic schemas, validators, SQLite DDL + repository, collectors
+├── features/        as-of-safe feature pipeline
+├── models/          Elo · offense/defense PPP · pace · possession-outcome models
+├── simulation/      possession-level engine + Monte Carlo runner
+├── agents/          prediction, validation, risk, ensemble, decision, explanation
+├── evaluation/      walk-forward backtest, calibration, league audit, DNP audit
+├── collection/      production loop, fixtures lifecycle, injury ingestion
+├── api/             stdlib HTTP JSON API + static Chinese web UI
+├── cli/             `basketball` entry point (predict/settle/serve/ingest/evaluate/…)
+└── tests/           unit · integration · regression · leakage · simulation
+tools/               user-side season fetchers (EuroLeague, ACB, NBL, CBA, BSL)
 ```
-
-## Phase status
-
-- [x] **Phase 1** — skeleton, schemas, data validation, SQLite + snapshots, test framework
-- [x] **Phase 2** — feature pipeline (Elo strength, net/off/def ratings, recent form, pace, shooting, rebounding, turnovers, time decay, rest days, availability)
-- [x] **Phase 3** — models B/C/D/E (team strength + win prob, offense/defense PPP, pace, possession-outcome distribution) assembled into simulation input params
-- [x] **Phase 4** — possession-level simulation engine + Monte Carlo (10k sims ≈ 1.7s), §19 distribution stats, §28 sanity tests
-- [x] **Phase 5** — walk-forward backtest (no random splits), §24 metrics, reliability diagram + ECE, three baselines, automated leakage/reality FAIL checks, decay-lambda sweep, synthetic league test bed
-- [x] **Phase 6** — risk agent (confidence + flags), trainable ensemble, prediction agent (reality/leakage gates), prediction settlement loop, `basketball predict` CLI, §32 acceptance checklist tests
-- [~] **Phase 7 (V1.1 real NBA data)** — all offline infrastructure DONE (raw manifests, real-CSV collector with NBA franchise map, coverage report, train-only parameter fitting, EXP-NBA-001..004, error analysis, §21 report, `ingest/coverage/experiments` CLI, full audit chain); **blocked on data**: no NBA data source reachable from this sandbox — see `DATA_REQUIREMENTS.md` (SOURCE_STATUS: UNAVAILABLE) for exactly what to provide.
-- [x] **Phase 8-A (pre-real-data hardening)** — test isolation fixed (ingest tests no longer write to the real `storage/processed/`), storage pollution removed, `bad.csv` moved out of the raw-source scan, invalid-Parquet reads fail cleanly, `basketball settle <game_id>` CLI added (§33 chain now fully command-driven), dependencies pruned to what is actually imported (pydantic, pandas), Phase 8-B command chain + player-availability data contract documented in `DATA_REQUIREMENTS.md`.
-- [x] **Phase 8-B1 (first real NBA data)** — real 2025-26 season ingested via the new stats.nba.com gamelog adapter (1,322 games, 30 teams, snapshot `90d58d1a28fd`); first real walk-forward experiments (Elo beats simulation on the 592-game test window — reported honestly), first real predict → settle → aggregate loop executed. Fitted parameters are reported only, never written over model defaults.
-- [x] **Phase 8-B2 (multi-season foundation)** — all 17 seasons ingested (20,440 real games, 2009-10 → 2025-26, snapshot `8a70477780e3`); `competition` field in the schema (REGULAR_SEASON/PLAY_IN/PLAYOFF/CUP, backfilled from game_id prefixes, legacy rows stay untagged); default prediction/training history is regular-season-only with explicit opt-in for other segments; windowed training (`--train-start` / `--train-seasons 1|3|5|all`) + `window-backtest` CLI; output-identical read-path optimizations (~4x faster backtests). Multi-season results (`docs/MULTI_SEASON_RESULTS.md`): **Elo is the best predictor in every window; frozen-default simulation never beats Elo and is ≈ random on the 5-season window** — reported as measured, parameters unchanged.
-- [x] **Phase 8-B3 (EuroLeague first integration)** — 2024-25 EuroLeague season ingested via the new live.euroleague.net adapter (330 real games: 306 regular + 3 play-in + 21 playoff incl. Final4, snapshot `ba262abb470a`); structural league isolation (feature history is scoped to the target game's own league — NBA and EuroLeague can never share Elo/baselines); 40-minute regulation threaded through to the simulator (`regulation_seconds=2400`, NBA 2880 untouched); EuroLeague team ids namespaced `EL-*` after the real MIL (Milan) vs NBA MIL (Milwaukee) collision was found; first real EuroLeague predict → settle → aggregate loop executed.
-- [x] **Phase 12 (spread probabilities + NBA fixtures + local API/UI)** — spread (让分) cover-probability layer (`agents/spread_probability`: Monte-Carlo margin samples + Elo→normal with as-of-safe σ; calibration experiment on 798 real NBA games / 7,026 line-probes picks `elo_normal` as NBA default, logloss 0.4446 vs 0.4692); NBA upcoming fixtures via the public ESPN scoreboard adapter (65 real games ingested on first pass; finals flip rows to FINAL for settlement via the new guarded `Repository.update_game_result`); matchup resolution with 中文 aliases; zero-dependency HTTP JSON API + Chinese web UI (`basketball serve`; `/api/predict` returns win probs for all three families, spread cover both providers, risk confidence, explanations). Frozen models untouched. See `docs/PHASE12_A_SPREAD_API.md`.
-- [x] **Phase 12-F/G (honest confidence + injury layer)** — risk-check recalibration: per-league p90 margin-std thresholds (the old global 15.0 flagged EVERY NBA game), confidence now discriminates; empirical hit-rate-by-bucket table from 8,933 frozen walk-forward games (`confidence-calibrate` CLI, surfaced in UI/API next to the checklist score); injury/availability layer LIVE: llimllib player logs (582 players + 28,701 stat rows) + ESPN public injury report (75 records → 216 availability rows) drive `available_minutes_share` and the previously dead `injury_uncertainty` flag (verified live on GSW@PHX: away share 0.772). Probabilities themselves remain untouched by design (spec §20).
-- [x] **Phase 12-H..J (five-league push + margin matrix + EuroLeague injuries)** — per-league spread-source defaults from real calibration (elo_normal for NBA/EL/ACB/CBA/BSL, simulation for NBL); 中文 aliases for NBL/EuroLeague/ACB/BSL; ACB+CBA upcoming fixtures (matchStatus-driven, edition-id→clubId bridge, status semantics normalized per source); totals over/under line (`total_line` 190/190.5 → sim-sample counts + labelled normal smoothing, frontend 大小球 card); simulator PPP-rescale fix (12-L: the sampler realized ~3.8% fewer points per possession than its recorded target — the totals under-lean bug; MC-vs-actual totals bias −12.5 → −2.2 on a 30-game walk-forward) with calibration artifacts re-run; margin-range matrix (13-bucket complete partition, simulation-counted and continuity-corrected-normal providers, `/api/predict` `margin_ranges` + frontend 比分矩阵); EuroLeague injury layer: E2026 calendar bootstrap via live-Header enumeration (70 finals landed, round 8 not yet drawn), BasketNews injury-report extractor (rendered-snapshot channel — the site 403s plain clients, statuses/round-targeting mapped, fail-loud), and the DNP audit (`dnp-audit`: OUT precision with rostered/absent/false-alarm split, snapshot mode for historical reports). See `docs/PHASE12_A_SPREAD_API.md` (12-H..J) and `docs/DATA_SOURCES.md` §8.
-
-## CLI
-
-```powershell
-$env:BASKETBALL_DB_PATH = "C:\lanqiu\storage\basketball.db"
-.\.venv\Scripts\python.exe -m basketball_agent.cli.main predict <game_id> `
-    --as-of 2024-11-19T12:00:00+00:00 --n-simulations 10000 --seed 42 --save
-```
-
-(`basketball predict ...` also works after `pip install -e .`.)  The report follows
-spec §34; `--save` persists the prediction so it can be settled against the
-final score with `basketball settle <game_id>` once the game is FINAL
-(spec §33: Prediction → Game → Result → Evaluation → Calibration
-→ Model Improvement).  The full real-data command chain
-(`validate → ingest → coverage → experiments/report → predict --save → settle`)
-is documented in `DATA_REQUIREMENTS.md`.
-
-## V1 acceptance (spec §32)
-
-Programmatically verified by `tests/integration/test_v1_acceptance.py`:
-
-```
-[x] 数据 Schema 完成        [x] 数据验证完成         [x] Feature Pipeline 完成
-[x] Elo 完成               [x] Offense/Defense Model 完成
-[x] Pace Model 完成        [x] Score Model 完成
-[x] Possession Simulation 完成   [x] Monte Carlo 完成
-[x] Risk Agent 完成        [x] Ensemble 完成
-[x] Reality Validation 完成 [x] Leakage Detection 完成
-[x] Walk-forward Backtest 完成  [x] Calibration 完成
-[x] Baseline 完成          [x] Reproducibility 完成
-[x] 赛前预测生成完成 (§33)   [x] 完整测试完成
-```
-
-## Development
-
-This workspace is offline (no PyPI access). The base Python at `C:\python3.13`
-already carries the scientific stack (pydantic, numpy, pandas, scipy,
-scikit-learn, ...), so the venv reuses it and only pytest is installed from
-local wheels (copied from the machine's pip cache into `.wheels/`).
-
-```powershell
-python -m venv --without-pip --system-site-packages .venv
-.\.venv\Scripts\python.exe -m pip install --no-index --find-links .wheels "pytest==9.1.1"
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-Note for this sandbox: the DSH file sandbox turns `os.mkdir` mode bits into
-real ACLs, so libraries creating temp dirs with mode `0o700` (tempfile, pip,
-pytest basetemp) produce unlistable directories. The root `conftest.py`
-neutralizes this for the test session (forces `0o777`, fresh per-run
-basetemp). It adapts the environment only — no test assertions are affected.
-
-## Validation gate
-
-Ingestion is `parse → validate → load`. A single ERROR blocks the entire
-batch (one transaction, all-or-nothing). Check ids are stable machine-readable
-strings (e.g. `temporal.availability_source_time`, `consistency.team_stats`).
-
 
 ## License
 
-MIT — see [LICENSE](LICENSE).  Open-source research project; no warranty.
-Scraped/acquired data is NOT included — every collector documents its source
-in `docs/DATA_SOURCES.md`, and users are responsible for complying with those
-sources' terms.
+[MIT](LICENSE) — research project, no warranty. Probabilities produced here
+are for research; if you use them for betting you accept the risk, and you
+still must comply with your data sources' and jurisdiction's terms.
